@@ -18,7 +18,7 @@ static void help()
 {
 }
 
-extern gboolean listenToBus(GstElement *pipeline, GstState * playing, unsigned int tms) ;
+extern gboolean listenToBus(GstElement *pipeline, GstState * playing, GstState *oldstate, unsigned int tms) ;
 
 typedef struct {
 	GstElement *pipeline;
@@ -138,8 +138,8 @@ int main( int argc, char** argv )
 	}
 	while (!terminate)
 	{
-		GstState outputplaying;
-		terminate = listenToBus(D.pipeline,&outputplaying,5) ;
+		GstState outputplaying,oldstate;
+		terminate = listenToBus(D.pipeline,&outputplaying,&oldstate,5) ;
 	}
 
     return 0;

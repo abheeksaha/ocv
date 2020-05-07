@@ -54,7 +54,6 @@ static void paddEventRemoved(GstElement *s, GstPad *p, gpointer d) ;
 #include <getopt.h>
 
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
-gboolean listenToBus(GstElement *pipeline, GstState * playing, unsigned int tms) ;
 static void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
 static void dataFrameStop(GstAppSrc *s,  gpointer data) ;
 extern void walkPipeline(GstBin *bin) ;
@@ -73,7 +72,6 @@ rpdmx.src_102 !  application/x-rtp,media=application,clock-rate=90000,payload=10
 appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 #endif
 
-extern bool retrieveFrame(unsigned long * sample, unsigned long * dst) ;
 
 int main( int argc, char** argv )
 {
@@ -282,7 +280,7 @@ int main( int argc, char** argv )
 	gst_element_set_state(GST_ELEMENT_CAST(D.dsink),GST_STATE_PLAYING) ;
 
 	gboolean terminate = FALSE ;
-	GstState inputstate ;
+	GstState inputstate,oldstate ;
 	do {
 		static gboolean capsprinter = FALSE;
 		GstSample *dgs = NULL;
@@ -295,7 +293,7 @@ int main( int argc, char** argv )
 		unsigned int numdataframes = 0;
 		gboolean noproc = FALSE ;
 
-		terminate = listenToBus(D.pipeline,&inputstate, 5) || (D.eos == TRUE) ;
+		terminate = listenToBus(D.pipeline,&inputstate,&oldstate, 5) || (D.eos == TRUE) ;
 		if (D.eos == TRUE) break ;
 		if (inputstate >= GST_STATE_READY ) {
 			gpointer videoFrameWaiting = NULL ;
@@ -435,7 +433,6 @@ static void processbuffer(void *A, int isz, void *oB, int obsz, void *B, int bsz
 	{
 		*pB = *pB^*pA++ ;
 	}
-	retrieveFrame(pB,pA) ;
 }
 
 static gboolean pts_buffer_match(GstBuffer *v1, GstBuffer *v2, GstClockTime *p1, GstClockTime *p2)
