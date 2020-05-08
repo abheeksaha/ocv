@@ -133,23 +133,10 @@ int main( int argc, char** argv )
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
 //		  	GstCaps *caps = gst_caps_new_simple ("application/x-raw", NULL);
 //			gst_app_src_set_caps(D.dsrc,caps) ;
-			g_object_set(G_OBJECT(D.dsrc), "format", GST_FORMAT_TIME,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "stream-type", GST_APP_STREAM_TYPE_STREAM,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "emit-signals", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "block", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "max-bytes", 300 ,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "do-timestamp", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "min-percent", 50 ,NULL) ;
-			g_signal_connect(G_OBJECT(D.dsrc), "need-data", G_CALLBACK(dataFrameWrite), &D) ;
-			g_signal_connect(G_OBJECT(D.dsrc), "enough-data", G_CALLBACK(dataFrameStop), &D) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D,dataFrameStop,&D) ;
 		}
 		{
-			g_signal_connect(GST_APP_SINK_CAST(D.vsink),"new-sample", sink_newsample,&D.vsinkq) ;
-			g_signal_connect(GST_APP_SINK_CAST(D.vsink),"new-preroll", sink_newpreroll,&D.vsinkq) ;
-			g_signal_connect(GST_APP_SINK_CAST(D.vsink),"eos", eosRcvd,&D.eos) ;
-			g_object_set(G_OBJECT(D.vsink), "emit-signals", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.vsink), "drop", FALSE, NULL) ;
-			g_object_set(G_OBJECT(D.vsink), "wait-on-eos", TRUE, NULL) ;
+			dcvConfigAppSink(D.vsink,sink_newsample, &D.vsinkq, sink_newpreroll, &D.vsinkq,eosRcvd, &D.eos) ; 
 		}
 	}
 	// Now link the pads
@@ -161,21 +148,13 @@ int main( int argc, char** argv )
 	else if (!mqsrc) {
 		g_printerr("Couldn't get static pad for message \n") ;
 	}
-	else {
-//		GstPadLinkReturn ret1 = gst_pad_link(vqsrc, rtpsink1) ;
-//		if (GST_PAD_LINK_FAILED(ret1)) {
-//			g_print("Couldn't link video to mux: ret=%d\n",ret1) ;
-//			g_print("%s:%s vqsrc linked to %s:%s\n",
-//					GST_ELEMENT_NAME(gst_pad_get_parent_element(vqsrc)),GST_PAD_NAME(vqsrc),
-//					GST_ELEMENT_NAME(gst_pad_get_parent_element(gst_pad_get_peer(vqsrc))),GST_PAD_NAME(gst_pad_get_peer(vqsrc))) ;
-//		}
-		GstPadLinkReturn ret2 = gst_pad_link(mqsrc, rtpsink2) ;
-		if (GST_PAD_LINK_FAILED(ret2)) {
-			g_printerr("Couldn't link data to mux: ret=%d\n", ret2) ;
+	else if (gst_pad_is_linked(mqsrc)){
 			g_print("%s:%s (mqsrc) linked to %s:%s\n",
 					GST_ELEMENT_NAME(gst_pad_get_parent_element(mqsrc)),GST_PAD_NAME(mqsrc),
 					GST_ELEMENT_NAME(gst_pad_get_parent_element(gst_pad_get_peer(mqsrc))),GST_PAD_NAME(gst_pad_get_peer(mqsrc))) ;
-		}
+	}
+	else {
+		g_print ("mqsrc should have been linked!!!\n") ;
 	}
 	/** Now we will walk the pipeline and dump the caps **/
 	ret = gst_element_set_state (D.pipeline, GST_STATE_PLAYING);
@@ -274,7 +253,7 @@ UNREF:
 				gst_sample_unref(ind) ;
 			}
 		}
-	} while (terminate == FALSE) ;
+	} while (terminate == FALSE && D.eos == FALSE) ;
 	g_print("Exiting!\n") ;
 }
 

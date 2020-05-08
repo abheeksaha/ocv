@@ -38,7 +38,8 @@ typedef struct {
 	srcstate_e dsrcstate;
 	unsigned int vsinkstate;
 	unsigned int dsinkstate;
-	gboolean eos;
+	gboolean deos;
+	gboolean veos;
 	/** Data holding elements **/
 	GQueue *dataqueue;
 	GQueue *olddataqueue;
@@ -58,13 +59,13 @@ static void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
 static void dataFrameStop(GstAppSrc *s,  gpointer data) ;
 extern void walkPipeline(GstBin *bin) ;
 
+#if 0
+tpoint.src_0 !  queue ! rtpvp9pay ! mux.sink_0  
+#endif
 static char srcdesc[] = "udpsrc name=usrc address=192.168.1.71 port=50018 ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! rtpvp9depay name=vp9d ! tee name=tpoint \
+rpdmx.src_96 ! rtpvp9depay name=vp9d ! queue ! tee name=tpoint \
 rtpmux name=mux ! queue !  udpsink name=usink host=192.168.1.71 port=50019 \
-tpoint.src_0 !  queue ! rtpvp9pay ! mux.sink_0 \
-tpoint.src_1 !  queue ! vp9dec name=vdec ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 ! tee name=2t \
-	2t.src_0 ! queue ! appsink name=vsink \
-	2t.src_1 ! queue ! testsink name=test \
+tpoint.src_1 !  queue ! vp9dec name=vdec ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 ! appsink name=vsink  \
 rpdmx.src_102 !  rtpgstdepay name=rgpd ! appsink name=dsink \
 appsrc name=dsrc !  application/x-rtp,medial=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 #if 0
@@ -115,7 +116,8 @@ int main( int argc, char** argv )
 	D.dataqueue = g_queue_new() ;
 	D.olddataqueue = g_queue_new() ;
 	D.videoframequeue = g_queue_new() ;
-	D.eos = FALSE ;
+	D.deos = FALSE ;
+	D.veos = FALSE ;
 
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.dsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsink")) ;
@@ -156,31 +158,10 @@ int main( int argc, char** argv )
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
 //		  	GstCaps *caps = gst_caps_new_simple ("application/x-raw", NULL);
 //			gst_app_src_set_caps(D.dsrc,caps) ;
-			g_object_set(G_OBJECT(D.dsrc), "format", GST_FORMAT_TIME,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "stream-type", GST_APP_STREAM_TYPE_STREAM, NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "emit-signals", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "block", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "max-bytes", MAX_DATA_BUF_ALLOWED << 1 ,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "do-timestamp", FALSE ,NULL) ;
-			g_object_set(G_OBJECT(D.dsrc), "min-percent", 50 ,NULL) ;
-			g_signal_connect(G_OBJECT(D.dsrc), "need-data", G_CALLBACK(dataFrameWrite), &D) ;
-			g_signal_connect(G_OBJECT(D.dsrc), "enough-data", G_CALLBACK(dataFrameStop), &D) ;
 		}
 		{
-			g_signal_connect(GST_APP_SINK_CAST(D.vsink),"new-sample", sink_newsample,&D.vsinkstate) ;
-			g_signal_connect(GST_APP_SINK_CAST(D.vsink),"new-preroll", sink_newpreroll,&D.vsinkstate) ;
-			g_signal_connect(GST_APP_SINK_CAST(D.vsink),"eos", eosRcvd,&D.eos) ;
-			g_object_set(G_OBJECT(D.vsink), "emit-signals", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.vsink), "drop", FALSE, NULL) ;
-			g_object_set(G_OBJECT(D.vsink), "wait-on-eos", TRUE, NULL) ;
-		}
-		{
-			g_signal_connect(GST_APP_SINK_CAST(D.dsink),"new-sample", sink_newsample,&D.dsinkstate) ;
-			g_signal_connect(GST_APP_SINK_CAST(D.dsink),"new-preroll", sink_newpreroll,&D.dsinkstate) ;
-			g_signal_connect(GST_APP_SINK_CAST(D.dsink),"eos", eosRcvd,&D) ;
-			g_object_set(G_OBJECT(D.dsink), "emit-signals", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.dsink), "drop", FALSE, NULL) ;
-			g_object_set(G_OBJECT(D.dsink), "wait-on-eos", TRUE, NULL) ;
+			dcvConfigAppSink(D.vsink,sink_newsample, &D.vsinkstate, sink_newpreroll, &D.vsinkstate,eosRcvd, &D.veos) ; 
+			dcvConfigAppSink(D.dsink,sink_newsample, &D.dsinkstate, sink_newpreroll, &D.dsinkstate,eosRcvd, &D.deos) ; 
 		}
 	/** Saving the depayloader pads **/
 		{
@@ -238,7 +219,7 @@ int main( int argc, char** argv )
 		{
 			GstElement * tp = gst_bin_get_by_name ( GST_BIN(D.pipeline), "tpoint") ;
 			g_assert(tp) ;
-			g_object_set(G_OBJECT(tp),"pull-mode",GST_TEE_PULL_MODE_SINGLE, NULL) ;
+			g_object_set(G_OBJECT(tp),"has-chain",TRUE, NULL) ;
 		}
 	}
 
@@ -293,9 +274,9 @@ int main( int argc, char** argv )
 		unsigned int numdataframes = 0;
 		gboolean noproc = FALSE ;
 
-		terminate = listenToBus(D.pipeline,&inputstate,&oldstate, 5) || (D.eos == TRUE) ;
-		if (D.eos == TRUE) break ;
-		if (inputstate >= GST_STATE_READY ) {
+		terminate = listenToBus(D.pipeline,&inputstate,&oldstate, 5) || (D.veos == TRUE) || (D.deos == TRUE) ;
+		if (D.veos == TRUE) break ;
+		if (inputstate == GST_STATE_PLAYING || inputstate == GST_STATE_PAUSED ) {
 			gpointer videoFrameWaiting = NULL ;
 			gpointer dataFrameWaiting = NULL ;
 			GstClockTime vframenum, vframeref;
@@ -303,27 +284,29 @@ int main( int argc, char** argv )
 
 			if (D.vsinkstate > 0)
 			{
-				GstBuffer *v ;
 				while ((vgs = gst_app_sink_try_pull_sample(D.vsink,GST_MSECOND)) != NULL)
 				{
-					v = gst_sample_get_buffer(vgs) ;
-					g_queue_push_tail(D.videoframequeue,(gpointer) v) ;
+					GstBuffer *v = gst_sample_get_buffer(vgs) ;
+					GstBuffer *newv = gst_buffer_copy_deep(v) ;
+					g_queue_push_tail(D.videoframequeue,(gpointer) newv) ;
 					g_print("Pushing video frame : %lu (num elements=%d)\n", GST_BUFFER_PTS(v), g_queue_get_length(D.videoframequeue)) ;
 					numvideoframes++;
-					gst_sample_unref(vgs) ;
+//					gst_buffer_unref(v) ;
+//					gst_sample_unref(vgs) ;
 				}
 				D.vsinkstate = 0 ;
 			}
 			if (D.dsinkstate > 0)
 			{
-				GstBuffer *d ;
 				while ((dgs = gst_app_sink_try_pull_sample(D.dsink,GST_MSECOND)) != NULL)
 				{
-					d = gst_sample_get_buffer(dgs) ;
-					g_queue_push_tail(D.olddataqueue,(gpointer) d) ;
+					GstBuffer *d = gst_sample_get_buffer(dgs) ;
+					GstBuffer *newd = gst_buffer_copy_deep(d) ;
+					g_queue_push_tail(D.olddataqueue,(gpointer) newd) ;
 					g_print("Pushing data frame : %lu (num elements=%d)\n", GST_BUFFER_PTS(d), g_queue_get_length(D.olddataqueue)) ;
 					numdataframes++;
-					gst_sample_unref(dgs) ;
+//					gst_buffer_unref(d) ;
+//					gst_sample_unref(dgs) ;
 				}
 				D.dsinkstate = 0 ;
 			}
@@ -349,7 +332,6 @@ int main( int argc, char** argv )
 
 					if ( (match = matchbuffer (vmap.data,vmap.size,odmap.data,odmap.size)) != TRUE)
 						g_printerr("Buffers didn't match\n",vframenum,vframeref);
-					g_assert( match == TRUE) ;
 					{
 						GstBuffer *databuf = gst_buffer_new_allocate(NULL,sizeof(guint64) + odmap.size*sizeof(char) + sizeof(unsigned long),NULL) ;
 						dmem = gst_buffer_get_all_memory(databuf) ;
@@ -361,13 +343,14 @@ int main( int argc, char** argv )
 
 // Add a message dat
 						g_print("Pushing data buffer...%d %d\n",D.vsinkstate,D.dsinkstate) ;
-						GST_BUFFER_PTS(databuf) = GST_BUFFER_PTS(videoFrameWaiting) + GST_MSECOND*4  ;
-						gst_app_src_push_buffer(D.dsrc,databuf) ;
-					//	gst_buffer_unref(databuf) ;
+						//gst_app_src_push_buffer(D.dsrc,databuf) ;
+						gst_buffer_unref(databuf) ;
 					}
 					gst_memory_unmap(vmem,&vmap) ;
 					gst_memory_unmap(odmem,&odmap) ;
 				}
+				//gst_buffer_unref(videoFrameWaiting) ;
+				//gst_buffer_unref(dataFrameWaiting) ;
 			}
 		}
 	} while (terminate == FALSE) ;
@@ -481,7 +464,7 @@ static void demuxpadAdded(GstElement *s, guint pt, GstPad *P, gpointer d)
 	static char dpn[] = "sinkd" ;
 	char *nm;
 	dpipe_t *dp = (dpipe_t *)d;
-	GstPad *vpd = dp->teepad;
+	GstPad *vpd = dp->vp9extpad;
 	GstPad *gpd = dp->gstextpad;
 	GstPad *tpd = (pt == 102  ? gpd:vpd) ;
 	GstCaps *tcps = (pt == 102 ? dp->dcaps:dp->vcaps) ;

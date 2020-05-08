@@ -187,3 +187,28 @@ void sink_newsample(GstAppSink *slf, gpointer d)
 	*D += 1 ;
 	g_print("New Sample in %s: %d\n",GST_ELEMENT_NAME(slf),*D) ;
 }
+
+gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs )
+{
+	g_object_set(G_OBJECT(dsrc), "format", GST_FORMAT_TIME,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "stream-type", GST_APP_STREAM_TYPE_STREAM,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "emit-signals", TRUE,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "block", TRUE,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "max-bytes", 300 ,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "do-timestamp", TRUE,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "min-percent", 50 ,NULL) ;
+	g_signal_connect(G_OBJECT(dsrc), "need-data", G_CALLBACK(src_dfw), dfw) ;
+	g_signal_connect(G_OBJECT(dsrc), "enough-data", G_CALLBACK(src_dfs), dfs) ;
+	return TRUE ;
+}
+
+gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_samp, sink_preroll_fn_t sink_pre, void *d_pre, sink_eos_fn_t eosRcvd, void *d_eos)  
+{
+	g_signal_connect(GST_APP_SINK_CAST(vsink),"new-sample", sink_newsample,d_samp) ;
+	g_signal_connect(GST_APP_SINK_CAST(vsink),"new-preroll", sink_newpreroll,d_pre) ;
+	g_signal_connect(GST_APP_SINK_CAST(vsink),"eos", eosRcvd,d_eos) ;
+	g_object_set(G_OBJECT(vsink), "emit-signals", TRUE,NULL) ;
+	g_object_set(G_OBJECT(vsink), "drop", FALSE, NULL) ;
+	g_object_set(G_OBJECT(vsink), "wait-on-eos", TRUE, NULL) ;
+	return TRUE;
+}
