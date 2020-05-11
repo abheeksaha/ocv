@@ -1,7 +1,7 @@
 #ifndef RSEQ_H
 #define RSEQ_H
 
-#define RSEQSIZE 13
+#define RSEQSIZE 5
 
 static unsigned int rseq[] = {
 1838,
@@ -18,4 +18,13 @@ static unsigned int rseq[] = {
 5818,
 7640,
 } ;
+
+typedef struct {
+	u32 count;
+	u32 tstmp;
+	u32 seqsize;
+	u32 seq[RSEQSIZE] ;
+	u32 checksum;
+} tag_t ;
+
 #endif

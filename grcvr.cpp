@@ -40,7 +40,7 @@ static char fileq[] = " testsink\n" ;
 static char fns[256] ;
 #if 1
 static char pipedesc[] = "udpsrc name=usrc address=192.168.1.71 port=50019 ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! rtpvp9depay name=vp9d ! queue ! vp9dec ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 ! autovideosink \
+rpdmx.src_96 ! rtpvp9depay name=vp9d ! queue ! avdec_vp9 ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 ! autovideosink \
 rpdmx.src_102 ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstdepay name=gstd ! queue ! appsink name=nxtrcv" ;
 #else
 static char pipedesc[] = "udpsrc name=usrc address=192.168.1.71 port=50019 ! rtpptdemux name=rpdmx \

@@ -12,17 +12,8 @@ static void help()
 {
 }
 
-typedef enum {
-	G_WAITING,
-	G_BLOCKED
-} srcstate_e ;
-
-typedef enum {
-	G_HASDATA,
-	G_NODATA
-} sinkstate_e ;
-
 static void processbuffer(void *A, int isz, void *oB, int obsz, void *B, int bsz) ;
+GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
 typedef struct {
 	GstElement *pipeline;
 	GstElement *vdec;
@@ -30,20 +21,17 @@ typedef struct {
 	GstAppSink *dsink;
 	/** Input elements **/
 	GstCaps *vcaps,*dcaps;
-	GstPad *vp9extpad, *teepad,*gstextpad;
 	/* Output elements **/
 	GstElement *mux;
 	GstElement *op;
 	GstAppSrc *dsrc;
 	srcstate_e dsrcstate;
-	unsigned int vsinkstate;
-	unsigned int dsinkstate;
 	gboolean deos;
 	gboolean veos;
 	/** Data holding elements **/
-	GQueue *dataqueue;
-	GQueue *olddataqueue;
-	GQueue *videoframequeue;
+	dcv_bufq_t dataqueue;
+	dcv_bufq_t olddataqueue;
+	dcv_bufq_t videoframequeue;
 } dpipe_t ;
 #define MAX_DATA_BUF_ALLOWED 240
 
@@ -55,24 +43,17 @@ static void paddEventRemoved(GstElement *s, GstPad *p, gpointer d) ;
 #include <getopt.h>
 
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
-static void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
-static void dataFrameStop(GstAppSrc *s,  gpointer data) ;
-extern void walkPipeline(GstBin *bin) ;
 
-#if 0
-tpoint.src_0 !  queue ! rtpvp9pay ! mux.sink_0  
-#endif
-static char srcdesc[] = "udpsrc name=usrc address=192.168.1.71 port=50018 ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! rtpvp9depay name=vp9d ! queue ! tee name=tpoint \
+static char srcdesc[] = "\
+udpsrc name=usrc address=192.168.1.71 port=50018 ! rtpptdemux name=rpdmx \
+rpdmx.src_96 ! rtpvp9depay name=vp9d ! tee name=tpoint \
+tpoint.src_0 ! queue ! avdec_vp9 name=vdec ! videoconvert ! videoscale ! tee name=tpoint2 \
+	tpoint2.src_0 ! queue ! autovideosink \
+	tpoint2.src_1 ! queue ! appsink name=vsink \
 rtpmux name=mux ! queue !  udpsink name=usink host=192.168.1.71 port=50019 \
-tpoint.src_1 !  queue ! vp9dec name=vdec ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 ! appsink name=vsink  \
-rpdmx.src_102 !  rtpgstdepay name=rgpd ! appsink name=dsink \
+rpdmx.src_102 ! rtpgstdepay name=rgpd ! appsink name=dsink \
+tpoint.src_1 ! queue ! rtpvp9pay ! mux.sink_0 \
 appsrc name=dsrc !  application/x-rtp,medial=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
-#if 0
-rpdmx.src_102 !  application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstdepay name=rgpd ! queue ! appsink name=dsink \
-appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
-#endif
-
 
 int main( int argc, char** argv )
 {
@@ -85,9 +66,11 @@ int main( int argc, char** argv )
 	guint txport = 50018;
 	gboolean dumpPipe = FALSE ;
 	gboolean stage1 = FALSE ;
+	gboolean tx=TRUE ;
 	help();
+	guint ctr=0;
 
-	while ((ch = getopt(argc, argv, "p:ds:")) != -1) {
+	while ((ch = getopt(argc, argv, "Np:ds:")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -101,6 +84,9 @@ int main( int argc, char** argv )
 				stage1 = TRUE ;
 			}
 		}
+		if (ch == 'N') {
+			tx = FALSE ;
+		}
 	}
 	gst_init(&argc, &argv) ;
 	g_print("Using txport = %u\n",txport) ;
@@ -113,11 +99,12 @@ int main( int argc, char** argv )
 		g_error_free(gerr) ;
 		exit(1) ;
 	}
-	D.dataqueue = g_queue_new() ;
-	D.olddataqueue = g_queue_new() ;
-	D.videoframequeue = g_queue_new() ;
+	D.dataqueue.bufq = g_queue_new() ;
+	D.olddataqueue.bufq = g_queue_new() ;
+	D.videoframequeue.bufq = g_queue_new() ;
 	D.deos = FALSE ;
 	D.veos = FALSE ;
+	D.dsrcstate = G_BLOCKED;
 
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.dsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsink")) ;
@@ -160,42 +147,40 @@ int main( int argc, char** argv )
 //			gst_app_src_set_caps(D.dsrc,caps) ;
 		}
 		{
-			dcvConfigAppSink(D.vsink,sink_newsample, &D.vsinkstate, sink_newpreroll, &D.vsinkstate,eosRcvd, &D.veos) ; 
-			dcvConfigAppSink(D.dsink,sink_newsample, &D.dsinkstate, sink_newpreroll, &D.dsinkstate,eosRcvd, &D.deos) ; 
+			dcvConfigAppSink(D.vsink,sink_newsample, &D.videoframequeue, sink_newpreroll, &D.videoframequeue,eosRcvd, &D.veos) ; 
+			dcvConfigAppSink(D.dsink,sink_newsample, &D.olddataqueue, sink_newpreroll, &D.olddataqueue,eosRcvd, &D.deos) ; 
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate) ;
 		}
 	/** Saving the depayloader pads **/
 		{
-			GstElement *teepoint = gst_bin_get_by_name( GST_BIN(D.pipeline),"tpoint") ; 
-			GstCaps *cps;
-			D.teepad = gst_element_get_static_pad(teepoint ,"sink") ;
-			if (D.teepad == NULL) {
-				g_printerr("No sink pad for vbin\n") ; 
-			}
-			cps = gst_pad_query_caps(D.teepad,NULL) ;
-			g_print("Sink video can handle caps:%s\n", gst_caps_to_string(cps)) ;
-			gst_pad_set_caps(D.teepad,D.vcaps) ;
-		}
-		{
 			GstElement *vp9depay = gst_bin_get_by_name( GST_BIN(D.pipeline),"vp9d") ; 
 			GstCaps *cps;
-			D.vp9extpad = gst_element_get_static_pad(vp9depay ,"sink") ;
-			if (D.vp9extpad == NULL) {
+			GstPad * pad = gst_element_get_static_pad(vp9depay ,"sink") ;
+			if (pad == NULL) {
 				g_printerr("No sink pad for vbin\n") ; 
 			}
-			cps = gst_pad_query_caps(D.vp9extpad,NULL) ;
+			cps = gst_pad_query_caps(pad,NULL) ;
 			g_print("VP9 Depay can handle:%s\n", gst_caps_to_string(cps)) ;
-			gst_pad_set_caps(D.vp9extpad,D.vcaps) ;
+			gst_pad_set_caps(pad,D.vcaps) ;
 		}
+#if 0
+		{
+			pad = gst_element_get_static_pad (src, "src");
+  			gst_pad_add_probe (pad, GST_PAD_PROBE_TYPE_BUFFER,
+      						(GstPadProbeCallback) cb_have_data, NULL, NULL);
+  			gst_object_unref (pad);
+		}
+#endif
 		{
 			GstElement *gstdepay = gst_bin_get_by_name( GST_BIN(D.pipeline),"rgpd") ; 
-			D.gstextpad = gst_element_get_static_pad(gstdepay ,"sink") ;
+			GstPad * gstextpad = gst_element_get_static_pad(gstdepay ,"sink") ;
 			GstCaps *cps;
-			if (D.gstextpad == NULL) {
+			if (gstextpad == NULL) {
 				g_printerr("No sink pad for vbin\n") ; 
 			}
-			cps = gst_pad_query_caps(D.gstextpad,NULL) ;
+			cps = gst_pad_query_caps(gstextpad,NULL) ;
 			g_print("Sink data can handle caps:%s\n", gst_caps_to_string(cps)) ;
-			gst_pad_set_caps(D.gstextpad,D.dcaps) ;
+			gst_pad_set_caps(gstextpad,D.dcaps) ;
 		}
 		{
 			GstElement *rtpdmx = gst_bin_get_by_name( GST_BIN(D.pipeline),"rpdmx") ;
@@ -216,11 +201,15 @@ int main( int argc, char** argv )
 			g_object_set(G_OBJECT(usrc),"caps", srccaps, NULL) ; 
 			g_object_set(G_OBJECT(usrc),"buffer-size", 100000, NULL) ; 
 		}
+#if 1
 		{
 			GstElement * tp = gst_bin_get_by_name ( GST_BIN(D.pipeline), "tpoint") ;
-			g_assert(tp) ;
+			if (tp) {
 			g_object_set(G_OBJECT(tp),"has-chain",TRUE, NULL) ;
+			g_object_set(G_OBJECT(tp),"allow-not-linked",TRUE, NULL) ;
+			}
 		}
+#endif
 	}
 
 	// Now link the pads
@@ -236,9 +225,6 @@ int main( int argc, char** argv )
 		g_printerr ("Unable to set data src to the playing state.\n");
 		return -1;
 	}
-	D.dsrcstate = G_BLOCKED;
-	D.dsinkstate = 0;
-	D.vsinkstate = 0;
 	GstClockTime dp,op;
 
 	dp = gst_pipeline_get_latency(GST_PIPELINE_CAST(D.pipeline)) ;
@@ -252,7 +238,6 @@ int main( int argc, char** argv )
 	}
 	if (dumpPipe == TRUE) {
 		g_print("Dumping pipeline\n") ;
-		walkPipeline( GST_BIN(D.pipeline)) ;
 		return (4) ;
 	}
 
@@ -263,7 +248,6 @@ int main( int argc, char** argv )
 	gboolean terminate = FALSE ;
 	GstState inputstate,oldstate ;
 	do {
-		static gboolean capsprinter = FALSE;
 		GstSample *dgs = NULL;
 		GstSample *vgs = NULL;
 		GstCaps * dbt = NULL ;
@@ -274,50 +258,21 @@ int main( int argc, char** argv )
 		unsigned int numdataframes = 0;
 		gboolean noproc = FALSE ;
 
-		terminate = listenToBus(D.pipeline,&inputstate,&oldstate, 5) || (D.veos == TRUE) || (D.deos == TRUE) ;
+		terminate = listenToBus(D.pipeline,&inputstate,&oldstate, 25) || (D.veos == TRUE) || (D.deos == TRUE) ;
 		if (D.veos == TRUE) break ;
+		ctr++ ;
 		if (inputstate == GST_STATE_PLAYING || inputstate == GST_STATE_PAUSED ) {
 			gpointer videoFrameWaiting = NULL ;
 			gpointer dataFrameWaiting = NULL ;
 			GstClockTime vframenum, vframeref;
 			guint64 *pd;
 
-			if (D.vsinkstate > 0)
+			while (!g_queue_is_empty(D.videoframequeue.bufq)&& !g_queue_is_empty(D.olddataqueue.bufq)) 
 			{
-				while ((vgs = gst_app_sink_try_pull_sample(D.vsink,GST_MSECOND)) != NULL)
-				{
-					GstBuffer *v = gst_sample_get_buffer(vgs) ;
-					GstBuffer *newv = gst_buffer_copy_deep(v) ;
-					g_queue_push_tail(D.videoframequeue,(gpointer) newv) ;
-					g_print("Pushing video frame : %lu (num elements=%d)\n", GST_BUFFER_PTS(v), g_queue_get_length(D.videoframequeue)) ;
-					numvideoframes++;
-//					gst_buffer_unref(v) ;
-//					gst_sample_unref(vgs) ;
-				}
-				D.vsinkstate = 0 ;
-			}
-			if (D.dsinkstate > 0)
-			{
-				while ((dgs = gst_app_sink_try_pull_sample(D.dsink,GST_MSECOND)) != NULL)
-				{
-					GstBuffer *d = gst_sample_get_buffer(dgs) ;
-					GstBuffer *newd = gst_buffer_copy_deep(d) ;
-					g_queue_push_tail(D.olddataqueue,(gpointer) newd) ;
-					g_print("Pushing data frame : %lu (num elements=%d)\n", GST_BUFFER_PTS(d), g_queue_get_length(D.olddataqueue)) ;
-					numdataframes++;
-//					gst_buffer_unref(d) ;
-//					gst_sample_unref(dgs) ;
-				}
-				D.dsinkstate = 0 ;
-			}
-
-
-
-			while (g_queue_get_length(D.videoframequeue) > 0 && g_queue_get_length(D.olddataqueue) > 0) 
-			{
+				ctr = 0 ;
 #if 1
-				videoFrameWaiting = (GstBuffer *)g_queue_pop_head(D.videoframequeue) ;
-				dataFrameWaiting = (GstBuffer *)g_queue_pop_head(D.olddataqueue) ;
+				videoFrameWaiting = GST_BUFFER_CAST(g_queue_pop_head(D.videoframequeue.bufq)) ;
+				dataFrameWaiting = GST_BUFFER_CAST(g_queue_pop_head(D.olddataqueue.bufq)) ;
 				if (videoFrameWaiting == NULL || dataFrameWaiting == NULL) { g_print("Something wrong\n") ;break ; }
 #endif
 				{
@@ -331,9 +286,13 @@ int main( int argc, char** argv )
 				/** Check for match **/
 
 					if ( (match = matchbuffer (vmap.data,vmap.size,odmap.data,odmap.size)) != TRUE)
-						g_printerr("Buffers didn't match\n",vframenum,vframeref);
 					{
-						GstBuffer *databuf = gst_buffer_new_allocate(NULL,sizeof(guint64) + odmap.size*sizeof(char) + sizeof(unsigned long),NULL) ;
+						g_print("Buffers didn't match\n");
+						terminate = TRUE ;
+					}
+					else
+					{
+						GstBuffer *databuf = gst_buffer_new_allocate(NULL,getTagSize(),NULL) ;
 						dmem = gst_buffer_get_all_memory(databuf) ;
 						if (gst_memory_map(dmem, &dmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
 						g_print("Input:%d,%d o/p:%d..\n",vmap.size,odmap.size, dmap.size) ;
@@ -342,51 +301,24 @@ int main( int argc, char** argv )
 						gst_memory_unmap(dmem,&dmap);
 
 // Add a message dat
-						g_print("Pushing data buffer...%d %d\n",D.vsinkstate,D.dsinkstate) ;
-						//gst_app_src_push_buffer(D.dsrc,databuf) ;
-						gst_buffer_unref(databuf) ;
+						g_print("Pushing data buffer...%u %u\n",
+								g_queue_get_length(D.videoframequeue.bufq),
+								g_queue_get_length(D.olddataqueue.bufq)) ;
+						gst_app_src_push_buffer(D.dsrc,databuf) ;
 					}
 					gst_memory_unmap(vmem,&vmap) ;
 					gst_memory_unmap(odmem,&odmap) ;
+					gst_buffer_unref(videoFrameWaiting);
+					gst_buffer_unref(dataFrameWaiting);
 				}
-				//gst_buffer_unref(videoFrameWaiting) ;
-				//gst_buffer_unref(dataFrameWaiting) ;
 			}
 		}
+		if (ctr == 5000)
+			walkPipeline(D.pipeline,0) ;
 	} while (terminate == FALSE) ;
 	g_print("Exiting!\n") ;
 }
 /** Handlers **/
-
-static void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
-{
-	dpipe_t *pD = (dpipe_t *)data ;
-	gpointer bufd;
-	gboolean srcfull = FALSE ;
-	g_print("%s Needs data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	if (g_queue_get_length(pD->dataqueue) == 0) {
-		pD->dsrcstate = G_WAITING;
-	}
-	while (((bufd = g_queue_pop_head(pD->dataqueue)) != NULL))
-	{
-		gst_app_src_push_buffer(s, GST_BUFFER_CAST(bufd)) ;
-		if ( (srcfull = (gst_app_src_get_current_level_bytes(s) > MAX_DATA_BUF_ALLOWED)) == TRUE)
-
-			break ;
-	}
-	if (srcfull == FALSE)
-	pD->dsrcstate = G_WAITING;
-	else 
-	pD->dsrcstate = G_BLOCKED;
-
-}
-
-static void dataFrameStop(GstAppSrc *s, gpointer data)
-{
-	dpipe_t *pD = (dpipe_t *)data ;
-	g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	pD->dsrcstate = G_BLOCKED;
-}
 
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 {
@@ -464,15 +396,18 @@ static void demuxpadAdded(GstElement *s, guint pt, GstPad *P, gpointer d)
 	static char dpn[] = "sinkd" ;
 	char *nm;
 	dpipe_t *dp = (dpipe_t *)d;
+#if 0
 	GstPad *vpd = dp->vp9extpad;
 	GstPad *gpd = dp->gstextpad;
 	GstPad *tpd = (pt == 102  ? gpd:vpd) ;
+#endif
 	GstCaps *tcps = (pt == 102 ? dp->dcaps:dp->vcaps) ;
 	nm = (pt == 102 ? dpn:vpn) ;
-	g_print("Received pad added signal for pt=%d:connected %s to connect to pad %s\n",pt,GST_PAD_NAME(P),GST_PAD_NAME(tpd)) ;
+	g_print("Received pad added signal for pt=%d %s\n",pt,GST_PAD_NAME(P)) ;
 	gst_pad_set_caps(P,tcps) ;
 	gst_pad_set_active(P,TRUE) ;
 
+#if 0
 	if (GST_PAD_IS_LINKED(P)) {
 		g_print("Pad already linked!\n") ;
 	}
@@ -480,16 +415,33 @@ static void demuxpadAdded(GstElement *s, guint pt, GstPad *P, gpointer d)
 		g_print("SinkPad already linked!\n") ;
 	}
 	else gst_pad_link(P,tpd) ;
+#endif
 	gst_pad_set_caps(P,tcps) ;
 	{
 		GstCaps *t1 = gst_pad_query_caps(P,NULL) ;
-		GstCaps *t2 = gst_pad_query_caps(tpd,NULL) ;
-		g_print("Marrying caps:%s on sink to caps %s on source\n",
-				gst_caps_to_string(t1), gst_caps_to_string(t2)) ;
+		GstCaps *t2 = gst_pad_query_caps(gst_pad_get_peer(P),NULL) ;
+		g_print("Marrying caps:%s on %s to caps %s on %s\n",
+				gst_caps_to_string(t1), 
+				GST_PAD_NAME(P),
+				gst_caps_to_string(t2),
+				GST_PAD_NAME(gst_pad_get_peer(P))) ;
 	}
 }
 
 static void demuxpadRemoved(GstElement *s, guint pt, GstPad *P, gpointer d)
 {
 	g_print("Received pad removed signal for pt=%d, %s\n",pt, GST_PAD_NAME(P)) ;
+}
+
+GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
+{
+  GstMapInfo map;
+  guint16 *ptr, t;
+  GstBuffer *buffer;
+
+  buffer = GST_PAD_PROBE_INFO_BUFFER (info);
+  dcv_bufq_t *dp = (dcv_bufq_t *)user_data ;
+  GstBuffer * newbuf = gst_buffer_copy_deep(buffer) ;
+  g_queue_push_tail(dp->bufq,gst_buffer_ref(newbuf)) ;
+  return GST_PAD_PROBE_OK;
 }

@@ -3,6 +3,18 @@
 
 #define validstate(k) ((k>=0) && (k<=4))
 
+typedef struct {
+	GQueue *bufq;
+	gboolean hasdata;
+} dcv_bufq_t ;
+
+typedef enum {
+	G_WAITING,
+	G_BLOCKED
+} srcstate_e ;
+
+typedef unsigned int u32 ;
+
 typedef void (*src_dfw_fn_t)(GstAppSrc *, guint, gpointer) ;
 typedef void (*src_dfs_fn_t)(GstAppSrc *, gpointer) ;
 gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs ) ;
@@ -18,7 +30,12 @@ gboolean matchbuffer(void *A, int isz, void *B, int osz) ;
 void eosRcvd(GstAppSink *slf, gpointer D) ;
 gboolean listenToBus(GstElement *pipeline, GstState * cstate, GstState *ostate, unsigned int tms) ;
 void testStats(GstElement *tst) ;
-void sink_newpreroll(GstAppSink *slf, gpointer d) ;
-void sink_newsample(GstAppSink *slf, gpointer d) ;
+GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d) ;
+GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d) ;
+void walkPipeline(GstElement *p, guint level) ;
+void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
+void dataFrameStop(GstAppSrc *s,  gpointer data) ;
+
+int getTagSize(void) ;
 
 #endif

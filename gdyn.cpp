@@ -4,29 +4,28 @@
 #include <gst/gst.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
+#include <plugins/elements/gsttee.h>
 
+#include "gutils.hpp"
 static void help()
 {
 }
 
-typedef enum {
-	G_WAITING,
-	G_BLOCKED
-} srcstate_e ;
-
 static void processbuffer(void *A, int isz, void *B, int osz) ;
 typedef struct {
 	GstElement *pipeline;
-	GstElement *vdec;
+	GstElement *tpt;
 	GstElement *mdmx;
 	GstAppSink *vsink;
 	GstAppSrc  *dsrc;
 	/* Output elements **/
 	GstElement *mux;
 	GstElement *op;
+	GstElement *vp9d;
 	srcstate_e dsrcstate;
 	gboolean eos;
 	unsigned long vsinkq;
+	dcv_bufq_t dq;
 } dpipe_t ;
 
 
@@ -35,20 +34,15 @@ typedef struct {
 #include "gutils.hpp"
 #include "rseq.hpp"
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
-static void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
-static void videoFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
-static void dataFrameStop(GstAppSrc *s,  gpointer data) ;
-static void videoFrameStop(GstAppSrc *s,  gpointer data) ;
 extern void walkPipeline(GstBin *bin) ;
 
-#if VP9PAY
-static char pipedesc[] = "filesrc location=v1.webm ! matroskademux name=mdmx ! tee name=tvs \
+static char pipedesc[] = "filesrc location=v1.webm ! matroskademux name=mdmx ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! udpsink name=usink \
-			  tvs.src_0 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
-			  tvs.src_1 ! queue ! vp9dec name=vp9d ! videoconvert ! videoscale ! video/x-raw,height=480,width=640 ! appsink  name=vsink \
+			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
+				  tpoint2.src_0 ! queue ! autovideosink \
+				  tpoint2.src_1 ! queue ! appsink name=vsink \
+			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
 			  appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
-#else
-#endif
 int main( int argc, char** argv )
 {
 
@@ -57,6 +51,7 @@ int main( int argc, char** argv )
 	GError *gerr = NULL;
 	char ch;
 	extern char *optarg;
+	static guint ctr=0;
 	guint txport = 50018;
 	gboolean dumpPipe = FALSE ;
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
@@ -92,10 +87,13 @@ int main( int argc, char** argv )
 	}
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.mdmx = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
-	D.vdec  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tvs") ;
+	D.tpt  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint") ;
+	D.vp9d  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vp9d") ;
 	D.eos = FALSE ;
 	D.vsinkq=0 ;
-	g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.vdec) ;
+	D.dq.bufq = g_queue_new() ;
+	D.dsrcstate = G_BLOCKED;
+	g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
 
 	{
 		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
@@ -103,6 +101,7 @@ int main( int argc, char** argv )
 		g_object_set(G_OBJECT(udpsink),"port", txport , NULL) ; 
 	}
 	{
+		g_object_set(G_OBJECT(D.tpt), "pull-mode", GST_TEE_PULL_MODE_SINGLE, NULL) ;
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"mux") ; g_assert(ge) ;
 			GstCaps *t,*u;
@@ -133,10 +132,10 @@ int main( int argc, char** argv )
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
 //		  	GstCaps *caps = gst_caps_new_simple ("application/x-raw", NULL);
 //			gst_app_src_set_caps(D.dsrc,caps) ;
-			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D,dataFrameStop,&D) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate) ;
 		}
 		{
-			dcvConfigAppSink(D.vsink,sink_newsample, &D.vsinkq, sink_newpreroll, &D.vsinkq,eosRcvd, &D.eos) ; 
+			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 
 		}
 	}
 	// Now link the pads
@@ -168,7 +167,6 @@ int main( int argc, char** argv )
 		g_printerr ("Unable to set data src to the playing state.\n");
 		return -1;
 	}
-	D.dsrcstate = G_BLOCKED;
 	GstClockTime dp,op;
 
 	dp = gst_pipeline_get_latency(GST_PIPELINE_CAST(D.pipeline)) ;
@@ -179,9 +177,7 @@ int main( int argc, char** argv )
 	}
 	if (dumpPipe == TRUE) {
 		g_print("Dumping pipeline\n") ;
-		walkPipeline( GST_BIN(D.pipeline)) ;
-		g_print("Dumping pipeline\n") ;
-		walkPipeline( GST_BIN(D.pipeline)) ;
+		walkPipeline(D.pipeline,1) ;
 		return (4) ;
 	}
 
@@ -192,20 +188,16 @@ int main( int argc, char** argv )
 	}
 
 	gboolean terminate = FALSE ;
-	GstState oldstate,newstate ;
+	GstState oldstate,newstate=GST_STATE_NULL ;
 	do {
-		static gboolean capsprinter = FALSE;
-		GstSample *dgs = NULL;
 		GstBuffer *databuf ;
 		GstBuffer *v = NULL ;
 		GstMemory *vmem,*dmem;
-		GstCaps * dbt = NULL ;
-		GstStructure *dbinfo = NULL ;
 		GstSegment *dbseg = NULL ;
 		static gboolean sendBuffer = TRUE ;
 		static guint vbufsnt = 0;
 
-		terminate = listenToBus(D.pipeline,&newstate,&oldstate,5) ;
+		terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
 #if 0
 		if (validstate(newstate) && validstate(oldstate) && newstate != oldstate )
 			g_print("New:%s Old:%s\n",
@@ -213,27 +205,15 @@ int main( int argc, char** argv )
 					gst_element_state_get_name(oldstate)) ;
 #endif
 
+		ctr++ ;
 		if (!terminate && !D.eos && newstate == GST_STATE_PLAYING) {
-			if (D.dsrcstate == G_WAITING){
-				GstSample * ind = gst_app_sink_try_pull_sample(D.vsink,GST_SECOND) ;
-				if (ind == NULL) {
-					g_print("No data\n") ;
-					continue ;
-				}
-				v = gst_sample_get_buffer(ind) ;
+			while (D.dsrcstate == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
+				ctr = 0 ;
+				v = GST_BUFFER_CAST(g_queue_pop_head(D.dq.bufq)) ;
 				if (sendBuffer == TRUE && v!=NULL) {
 					GstMapInfo vmap,dmap;
 					unsigned long *pd ;
-					if (capsprinter == FALSE && v != NULL) {
-						dbt = gst_sample_get_caps(ind) ;
-						dbinfo = gst_sample_get_info(ind);
-						if (dbt == NULL) continue;
-						gchar *gs = gst_caps_to_string(dbt);
-						g_print("Data Received:%s\n",gs) ;
-						g_free(gs) ;
-						capsprinter=TRUE;
-					}
-					databuf = gst_buffer_new_allocate(NULL,(RSEQSIZE+2)*sizeof(unsigned long),NULL) ;
+					databuf = gst_buffer_new_allocate(NULL,getTagSize(),NULL) ;
 					vmem = gst_buffer_get_all_memory(v) ;
 					dmem = gst_buffer_get_all_memory(databuf) ;
 					if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
@@ -245,48 +225,22 @@ int main( int argc, char** argv )
 					gst_memory_unmap(vmem,&vmap);
 
 // Add a message dat
-					g_print("Pushing data buffer...") ;
-					gst_app_src_push_buffer(D.dsrc,databuf) ;
+					GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
+					g_print("Pushing data buffer...(%d)",ret ) ;
 					sendBuffer = TRUE ;
+					gst_buffer_unref(v) ;
 				}
-UNREF:
-				gst_sample_unref(ind) ;
 			}
+		}
+		if (ctr >= 500) {
+			walkPipeline(D.pipeline,0) ;
+			ctr = 0 ;
+			terminate = TRUE ;
 		}
 	} while (terminate == FALSE && D.eos == FALSE) ;
 	g_print("Exiting!\n") ;
 }
 
-#if 0
-static void videoFrameWrite(GstAppSrc *s, guint length, gpointer data)
-{
-	dpipe_t *pD = (dpipe_t *)data ;
-	g_print("%s Needs video\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	pD->vsrcstate = G_WAITING;
-}
-#endif
-static void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
-{
-	dpipe_t *pD = (dpipe_t *)data ;
-	g_print("%s Needs data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	pD->dsrcstate = G_WAITING;
-}
-
-#if 0
-static void videoFrameStop(GstAppSrc *s, gpointer data)
-{
-	dpipe_t *pD = (dpipe_t *)data ;
-	guint64 vbklog = gst_app_src_get_current_level_bytes(pD->vsrc) ;
-	g_print("%s full (%lu)\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s)),vbklog) ;
-	pD->vsrcstate = G_BLOCKED;
-}
-#endif
-static void dataFrameStop(GstAppSrc *s, gpointer data)
-{
-	dpipe_t *pD = (dpipe_t *)data ;
-	g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	pD->dsrcstate = G_BLOCKED;
-}
 
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 {
