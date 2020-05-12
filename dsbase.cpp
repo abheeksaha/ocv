@@ -8,6 +8,7 @@
 #include "gutils.hpp"
 #include "rseq.hpp"
 
+#define MAX_STAY 1
 static void help()
 {
 }
@@ -48,7 +49,7 @@ static char srcdesc[] = "\
 udpsrc name=usrc address=192.168.1.71 port=50018 ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! rtpvp9depay name=vp9d ! tee name=tpoint \
 tpoint.src_0 ! queue ! avdec_vp9 name=vdec ! videoconvert ! videoscale ! tee name=tpoint2 \
-	tpoint2.src_0 ! queue ! autovideosink \
+	tpoint2.src_0 ! queue ! fakesink \
 	tpoint2.src_1 ! queue ! appsink name=vsink \
 rtpmux name=mux ! queue !  udpsink name=usink host=192.168.1.71 port=50019 \
 rpdmx.src_102 ! rtpgstdepay name=rgpd ! appsink name=dsink \
@@ -266,16 +267,33 @@ int main( int argc, char** argv )
 			gpointer dataFrameWaiting = NULL ;
 			GstClockTime vframenum, vframeref;
 			guint64 *pd;
+			gint vfmatch;
+			dcv_BufContainer_t *dataFrameContainer;
 
 			while (!g_queue_is_empty(D.videoframequeue.bufq)&& !g_queue_is_empty(D.olddataqueue.bufq)) 
 			{
+				int stay=0;
 				ctr = 0 ;
-#if 1
-				videoFrameWaiting = GST_BUFFER_CAST(g_queue_pop_head(D.videoframequeue.bufq)) ;
-				dataFrameWaiting = GST_BUFFER_CAST(g_queue_pop_head(D.olddataqueue.bufq)) ;
-				if (videoFrameWaiting == NULL || dataFrameWaiting == NULL) { g_print("Something wrong\n") ;break ; }
-#endif
+				if ( (dataFrameContainer = (dcv_BufContainer_t *)g_queue_pop_head(D.olddataqueue.bufq)) == NULL) {
+				       g_print("No data frame ...very strange\n") ;
+				}
+				if ( ((vfmatch = dcvFindMatchingContainer(D.videoframequeue.bufq,dataFrameContainer)) == -1) &&
+			       	      (vfmatch >= g_queue_get_length(D.videoframequeue.bufq))){
+					g_print("No match found: vfmatch=%d\n",vfmatch) ;
+					if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
+						dcvBufContainerFree(dataFrameContainer) ;
+						free(dataFrameContainer) ;
+						g_print("Dropping data buffer, no match for too long\n") ;
+					}
+					else 
+						g_queue_push_tail(D.olddataqueue.bufq,dataFrameContainer) ;
+
+					continue ;
+				}
+				else
 				{
+					dataFrameWaiting = dataFrameContainer->nb;
+					videoFrameWaiting = ((dcv_BufContainer_t *)g_queue_pop_nth(D.videoframequeue.bufq,vfmatch))->nb ;
 					GstMemory *vmem,*dmem,*odmem;
 					GstMapInfo vmap,odmap,dmap;
 					gboolean match=FALSE ;
@@ -283,14 +301,6 @@ int main( int argc, char** argv )
 					odmem = gst_buffer_get_all_memory(dataFrameWaiting) ;
 					if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
 					if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
-				/** Check for match **/
-
-					if ( (match = matchbuffer (vmap.data,vmap.size,odmap.data,odmap.size)) != TRUE)
-					{
-						g_print("Buffers didn't match\n");
-						terminate = TRUE ;
-					}
-					else
 					{
 						GstBuffer *databuf = gst_buffer_new_allocate(NULL,getTagSize(),NULL) ;
 						dmem = gst_buffer_get_all_memory(databuf) ;

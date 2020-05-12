@@ -120,8 +120,9 @@ void walkPipeline(GstElement *p, guint level)
 }
 
 
+/** Buffer Manipulation **/
 #include <sys/time.h>
-void tagbuffer(void *A, int isz, void *B, int osz)
+void dcvTagBuffer(void *A, int isz, void *B, int osz)
 {
 	int i;
 	static int count=0;
@@ -151,8 +152,23 @@ void tagbuffer(void *A, int isz, void *B, int osz)
 	g_print("Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
 }
 
+gint dcvLengthOfStay(dcv_BufContainer_t *k)
+{
+	struct timeval tn;
+	struct timezone tz;
+	gettimeofday(&tn,&tz) ;
+	return tn.tv_sec - k->ctime.tv_sec ;
+}
 
-gboolean matchbuffer(void *A, int isz, void *B, int osz)
+void dcvBufContainerFree(dcv_BufContainer_t *P)
+{
+	if (!P) return ;
+	gst_buffer_unref(P->nb) ;
+	gst_caps_unref(P->caps) ;
+	return ;
+}
+
+gboolean dcvMatchBuffer(void *B, int osz, void *A, int isz)
 {
 	gboolean retval = FALSE ;
 	int i;
@@ -161,32 +177,54 @@ gboolean matchbuffer(void *A, int isz, void *B, int osz)
 	u32 hsh=0;
 	int sequence[1024];
 	g_assert(pd->seqsize < 1024) ;
-	g_print("Seq of size %d: count(%u) tstmp=%u hash=%u: ", pd->seqsize,pd->count,pd->tstmp,pd->checksum)  ;
+//	g_print("Seq of size %d: count(%u) tstmp=%u hash=%u: ", pd->seqsize,pd->count,pd->tstmp,pd->checksum)  ;
 	g_assert(pd->seqsize == RSEQSIZE) ;
 	for (i=0; i<pd->seqsize; i++) {
 		sequence[i] = pd->seq[i] ;
-		g_print("pA[%u]=%u ",sequence[i],pA[sequence[i]]) ;
+	//	g_print("pA[%u]=%u ",sequence[i],pA[sequence[i]]) ;
 		hsh ^= pA[sequence[i]] ;
 	}
-	g_print("Checksum = %u ..", hsh) ;
+//	g_print("Checksum = %u ..", hsh) ;
 	hsh ^= pd->checksum ;
 	if (hsh == 0) { retval = TRUE ; }
 	else retval = FALSE ;
-	g_print("hsh = %u (%s)\n", hsh, (hsh == 0? "match":"fail")) ;
+//	g_print("hsh = %u (%s)\n", hsh, (hsh == 0? "match":"fail")) ;
 	return retval ;
+}
+
+gint dcvMatchContainer (gconstpointer A, gconstpointer B )
+{
+	dcv_BufContainer_t *pA = (dcv_BufContainer_t *)A ;
+	dcv_BufContainer_t *pB = (dcv_BufContainer_t *)B ;
+	gboolean retval=FALSE ;
+	GstMemory *vmem,*odmem;
+	GstMapInfo vmap,odmap;
+
+	odmem = gst_buffer_get_all_memory(pA->nb) ;
+	if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
+	vmem = gst_buffer_get_all_memory(pB->nb) ;
+	if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
+	retval = dcvMatchBuffer((void *)vmap.data,(int)vmap.size,(void *)odmap.data,(int)odmap.size) ;
+	gst_memory_unmap(vmem,&vmap) ;
+	gst_memory_unmap(odmem,&odmap) ;
+	if (retval == TRUE) return 0 ;
+	else return 1 ;
+}
+
+int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d)
+{
+	GList *p ;
+	if (q==NULL) return -1 ;
+	if ((p = g_queue_find_custom(q,d,dcvMatchContainer)) == NULL) 
+		return -1 ;
+	else
+		return g_queue_link_index(q,p) ;
 }
 
 int getTagSize()
 {
 	int sz = sizeof(tag_t) ;
 	return sz ;
-}
-
-void eosRcvd(GstAppSink *slf, gpointer D)
-{
-	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
-	gboolean *eos = (gboolean *)D ;
-	*eos = TRUE ;
 }
 
 void testStats(GstElement *tst)
@@ -198,6 +236,15 @@ void testStats(GstElement *tst)
 	gst_structure_free(statsStruct) ;
 	return ;
 }
+
+/** Sink and Source Handlers **/
+void eosRcvd(GstAppSink *slf, gpointer D)
+{
+	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	gboolean *eos = (gboolean *)D ;
+	*eos = TRUE ;
+}
+
 GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 {
 	GstCaps * dbt = NULL ;
@@ -231,8 +278,12 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 		GstSample *gsm ;
 		if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
 			GstBuffer *gb = gst_sample_get_buffer(gsm);
-			GstBuffer *nb = gst_buffer_copy_deep(gb);
-			g_queue_push_tail(D->bufq,gst_buffer_ref(nb)) ;
+			dcv_BufContainer_t *bcnt = malloc(sizeof(dcv_BufContainer_t)) ;
+			bcnt->nb = gst_buffer_copy_deep(gb) ;
+			bcnt->caps = gst_sample_get_caps(gsm) ;
+			gst_buffer_ref(bcnt->nb) ;
+			gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
+			g_queue_push_tail(D->bufq,bcnt) ;
 			g_print("New Sample in %s: %u\n",GST_ELEMENT_NAME(slf),g_queue_get_length(D->bufq)) ;
 			return GST_FLOW_OK;
 		}
@@ -243,6 +294,25 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 }
 
+void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
+{
+	srcstate_e *pD = (srcstate_e *)data ;
+	if (*pD != G_WAITING) {
+		g_print("%s Needs data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
+		*pD = G_WAITING;
+	}
+}
+void dataFrameStop(GstAppSrc *s, gpointer data)
+{
+	srcstate_e *pD = (srcstate_e *)data ;
+	if (*pD != G_BLOCKED) {
+	g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
+	*pD = G_BLOCKED;
+	}
+}
+
+
+/** Configuration Functions **/
 gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs )
 {
 	if (dsrc == NULL) return FALSE ;
@@ -268,20 +338,4 @@ gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_sa
 	g_object_set(G_OBJECT(vsink), "drop", FALSE, NULL) ;
 	g_object_set(G_OBJECT(vsink), "wait-on-eos", TRUE, NULL) ;
 	return TRUE;
-}
-void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
-{
-	srcstate_e *pD = (srcstate_e *)data ;
-	if (*pD != G_WAITING) {
-		g_print("%s Needs data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-		*pD = G_WAITING;
-	}
-}
-void dataFrameStop(GstAppSrc *s, gpointer data)
-{
-	srcstate_e *pD = (srcstate_e *)data ;
-	if (*pD != G_BLOCKED) {
-	g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	*pD = G_BLOCKED;
-	}
 }

@@ -1,12 +1,20 @@
 #ifndef GBUS_HPP
 #define GBUS_HPP
 
+#include <sys/time.h>
 #define validstate(k) ((k>=0) && (k<=4))
 
 typedef struct {
 	GQueue *bufq;
 	gboolean hasdata;
 } dcv_bufq_t ;
+
+typedef struct {
+	GstBuffer *nb;
+	GstCaps *caps;
+	struct timeval ctime;
+	struct timezone ctz;
+} dcv_BufContainer_t ;
 
 typedef enum {
 	G_WAITING,
@@ -24,8 +32,13 @@ typedef void (*sink_sample_fn_t)(GstAppSink *, gpointer) ;
 typedef void (*sink_eos_fn_t)(GstAppSink *, gpointer) ;
 gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_samp, sink_preroll_fn_t sink_pre, void *d_pre, sink_eos_fn_t eosRcvd, void *d_eos)  ;
 
-void tagbuffer(void *A, int isz, void *B, int osz) ;
-gboolean matchbuffer(void *A, int isz, void *B, int osz) ;
+/** Buffer Functions **/
+void dcvTagBuffer(void *A, int isz, void *B, int osz) ;
+gboolean dcvMatchBuffer(void *A, int isz, void *B, int osz) ;
+gint dcvMatchContainer (gconstpointer A, gconstpointer B ) ;
+int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d) ;
+void dcvBufContainerFree(dcv_BufContainer_t *) ;
+gint dcvLengthOfStay(dcv_BufContainer_t *k) ;
 
 void eosRcvd(GstAppSink *slf, gpointer D) ;
 gboolean listenToBus(GstElement *pipeline, GstState * cstate, GstState *ostate, unsigned int tms) ;

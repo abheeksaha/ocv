@@ -39,7 +39,7 @@ extern void walkPipeline(GstBin *bin) ;
 static char pipedesc[] = "filesrc location=v1.webm ! matroskademux name=mdmx ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! udpsink name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
-				  tpoint2.src_0 ! queue ! autovideosink \
+				  tpoint2.src_0 ! queue ! fakesink \
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
 			  appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
@@ -208,8 +208,10 @@ int main( int argc, char** argv )
 		ctr++ ;
 		if (!terminate && !D.eos && newstate == GST_STATE_PLAYING) {
 			while (D.dsrcstate == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
+				dcv_BufContainer_t *dv ;
 				ctr = 0 ;
-				v = GST_BUFFER_CAST(g_queue_pop_head(D.dq.bufq)) ;
+				dv = (dcv_BufContainer_t *)g_queue_pop_head(D.dq.bufq) ;
+				v = GST_BUFFER_CAST(dv->nb) ;
 				if (sendBuffer == TRUE && v!=NULL) {
 					GstMapInfo vmap,dmap;
 					unsigned long *pd ;
@@ -220,7 +222,7 @@ int main( int argc, char** argv )
 					if (gst_memory_map(dmem, &dmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
 					g_print("Input:%d o/p:%d..",vmap.size,dmap.size) ;
 					pd = (unsigned long *)dmap.data ;
-					tagbuffer(vmap.data,vmap.size,pd,dmap.size) ;
+					dcvTagBuffer(vmap.data,vmap.size,pd,dmap.size) ;
 					gst_memory_unmap(dmem,&dmap);
 					gst_memory_unmap(vmem,&vmap);
 
@@ -228,7 +230,8 @@ int main( int argc, char** argv )
 					GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 					g_print("Pushing data buffer...(%d)",ret ) ;
 					sendBuffer = TRUE ;
-					gst_buffer_unref(v) ;
+					dcvBufContainerFree(dv) ;
+					free(dv) ;
 				}
 			}
 		}
