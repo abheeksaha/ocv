@@ -1,0 +1,15 @@
+There are three programs here
+
+a. gdyn is stage 1 and what should run on the Mobile. It reads data from a file, does initial processing
+and then transmits both the video and the output code on RTP using payload types 96 and 102 respectively.
+By default it transmits on port 50018, use the -p option to change this
+
+b. gsproc is the intermediate stage; it takes in two streams (video and data) and outputs two streams 
+(video and data). It listens to port 50018
+
+c. grcvr is the final stage, which displays the video. It listens to port 50019
+
+To connect gdyn directly to grcvr, use gdyn -p 50019. Otherwise, it will go through gsproc. There is a buffering/corruption
+error that I am still working on.
+
+-Abheek

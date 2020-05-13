@@ -261,57 +261,61 @@ void eosRcvd(GstAppSink *slf, gpointer D)
 {
 	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
 	gboolean *eos = (gboolean *)D ;
-	*eos = TRUE ;
+	*eos = FALSE ;
 }
 
 GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 {
 	GstCaps * dbt = NULL ;
 	gchar *gs;
-	if (d != NULL) {
-		dcv_bufq_t *D = (dcv_bufq_t *)d ;
-		GstSample *gsm ;
-		if ((gsm = gst_app_sink_pull_preroll(slf)) != NULL)
-		{
-			g_print("New Preroll in %s: %u --",GST_ELEMENT_NAME(slf),g_queue_get_length(D->bufq)) ;
-			dbt = gst_sample_get_caps(gsm) ;
-			gs = gst_caps_to_string(dbt);
-			g_print("Data Received: caps %s \n",gs) ;
-			g_free(gs) ;
-			gst_sample_unref(gsm) ;
-			gst_caps_unref(dbt) ;
-			return GST_FLOW_OK;
-		}
-		else
-			return GST_FLOW_ERROR;
-	}
-	else 
+	if (d == NULL) 
+	{
 		g_print("New Preroll in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		return GST_FLOW_OK ;
+	}
+	dcv_bufq_t *D = (dcv_bufq_t *)d ;
+	GstSample *gsm ;
+	if ((gsm = gst_app_sink_pull_preroll(slf)) != NULL)
+	{
+		g_print("New Preroll in %s: %u --",GST_ELEMENT_NAME(slf),g_queue_get_length(D->bufq)) ;
+		dbt = gst_sample_get_caps(gsm) ;
+		gs = gst_caps_to_string(dbt);
+		g_print("Data Received: caps %s \n",gs) ;
+		g_free(gs) ;
+		gst_sample_unref(gsm) ;
+		gst_caps_unref(dbt) ;
+		return GST_FLOW_OK;
+	}
+	else
+		return GST_FLOW_ERROR;
 }
 
 GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 {
 	int cnt=0;
-	if (d != NULL) {
-		dcv_bufq_t *D = (dcv_bufq_t *)d ;
-		GstSample *gsm ;
-		if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
-			GstBuffer *gb = gst_sample_get_buffer(gsm);
-			dcv_BufContainer_t *bcnt = malloc(sizeof(dcv_BufContainer_t)) ;
-			bcnt->nb = gst_buffer_copy_deep(gb) ;
-			bcnt->caps = gst_sample_get_caps(gsm) ;
-			gst_buffer_ref(bcnt->nb) ;
-			gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
-			g_queue_push_tail(D->bufq,bcnt) ;
-			gettimeofday(&D->lastData,&D->tz) ;
-			g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),D->lastData.tv_sec, D->lastData.tv_usec,g_queue_get_length(D->bufq)) ;
-			return GST_FLOW_OK;
-		}
-		else
-			return GST_FLOW_ERROR ;
-	}
-	else 
+	if (d == NULL) {
 		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		return GST_FLOW_OK;
+	}
+
+	dcv_bufq_t *D = (dcv_bufq_t *)d ;
+	GstSample *gsm ;
+	if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
+		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
+		g_assert(glb == NULL) ;
+		GstBuffer *gb = gst_sample_get_buffer(gsm);
+		dcv_BufContainer_t *bcnt = malloc(sizeof(dcv_BufContainer_t)) ;
+		bcnt->nb = gst_buffer_copy_deep(gb) ;
+		bcnt->caps = gst_sample_get_caps(gsm) ;
+		gst_buffer_ref(bcnt->nb) ;
+		gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
+		g_queue_push_tail(D->bufq,bcnt) ;
+		gettimeofday(&D->lastData,&D->tz) ;
+		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),D->lastData.tv_sec, D->lastData.tv_usec,g_queue_get_length(D->bufq)) ;
+		return GST_FLOW_OK;
+	}
+	else
+		return GST_FLOW_ERROR ;
 }
 
 void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
@@ -340,7 +344,7 @@ gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_d
 	g_object_set(G_OBJECT(dsrc), "stream-type", GST_APP_STREAM_TYPE_STREAM,NULL) ;
 	g_object_set(G_OBJECT(dsrc), "emit-signals", TRUE,NULL) ;
 	g_object_set(G_OBJECT(dsrc), "block", TRUE,NULL) ;
-	g_object_set(G_OBJECT(dsrc), "max-bytes", 300 ,NULL) ;
+	g_object_set(G_OBJECT(dsrc), "max-bytes", 3000 ,NULL) ;
 	g_object_set(G_OBJECT(dsrc), "do-timestamp", TRUE ,NULL) ;
 	g_object_set(G_OBJECT(dsrc), "min-percent", 50 ,NULL) ;
 	g_signal_connect(G_OBJECT(dsrc), "need-data", G_CALLBACK(src_dfw), dfw) ;

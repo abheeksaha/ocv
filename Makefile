@@ -17,9 +17,9 @@ DEPFILES = rseq.hpp gutils.hpp
 .c.o:
 	$(CC) $(CFLAGS) -c $*.c
 
-all: gdyn grcvr dsproc
+all: gdyn grcvr gsproc
 
-dsproc: dsbase.o gutils.o $(DEPFILES)
+gsproc: dsbase.o gutils.o $(DEPFILES)
 	$(LDCPP) -o $@ gutils.o dsbase.o $(LDFLAGS) -lopencv_world -lm
 
 gdyn: gdyn.o gutils.o $(DEPFILES)

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #include <gst/gst.h>
 #include <gst/gstbin.h>
@@ -34,6 +35,8 @@ typedef struct {
 #include "gutils.hpp"
 #include "rseq.hpp"
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
+static GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
+static GstPadProbeReturn cb_have_data_bl (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
 extern void walkPipeline(GstBin *bin) ;
 
 static char pipedesc[] = "filesrc location=v1.webm ! matroskademux name=mdmx ! queue ! tee name=tpoint \
@@ -56,6 +59,7 @@ int main( int argc, char** argv )
 	gboolean dotx = TRUE ;
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
+	guint buffercount = 0 ;
 	help();
 
 	while ((ch = getopt(argc, argv, "p:t")) != -1) {
@@ -71,7 +75,7 @@ int main( int argc, char** argv )
 	gst_init(&argc, &argv) ;
 	g_print("Using txport = %u\n",txport) ;
 	
-	GstPad *rtpsink1, *rtpsink2, *mqsrc ;
+	GstPad *rtpsink1, *rtpsink2, *mqsrc, *srcpad ;
 
 	gerr = NULL ;
 	GError * error = NULL;
@@ -113,6 +117,10 @@ int main( int argc, char** argv )
 //			gst_pad_set_caps(rtpsink1, gst_caps_new_simple ("application/x-rtp", NULL)) ;
 			g_print("rtpsink2 likes caps: %s\n", gst_caps_to_string(u)) ;
 //			gst_pad_set_caps(rtpsink2,gst_caps_new_simple ("application/x-rtp", NULL)) ;
+			srcpad = gst_element_get_static_pad (ge, "src");
+  			gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BUFFER, (GstPadProbeCallback) cb_have_data, &buffercount, NULL); 
+  			gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BUFFER_LIST, (GstPadProbeCallback) cb_have_data_bl, &buffercount, NULL); 
+			gst_object_unref (srcpad);
 		}
 #if VP9PAY
 		{
@@ -137,6 +145,8 @@ int main( int argc, char** argv )
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 
 		}
+	}
+	{
 	}
 	// Now link the pads
   	if (!rtpsink1 || !rtpsink2) { 
@@ -191,6 +201,7 @@ int main( int argc, char** argv )
 		GstSegment *dbseg = NULL ;
 		static gboolean sendBuffer = TRUE ;
 		static guint vbufsnt = 0;
+		gboolean pipeterminate = FALSE ;
 
 		terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
 #if 0
@@ -201,7 +212,7 @@ int main( int argc, char** argv )
 #endif
 
 		ctr++ ;
-		if (!terminate && !D.eos && newstate == GST_STATE_PLAYING) {
+		if (newstate == GST_STATE_PLAYING) {
 			while (D.dsrcstate == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
 				dcv_BufContainer_t *dv ;
 				ctr = 0 ;
@@ -226,7 +237,7 @@ int main( int argc, char** argv )
 					{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 
-						g_print("Pushing data buffer...(%d)",ret ) ;
+						g_print("Pushing data buffer...(%d)...remaining(%u)\n",ret,g_queue_get_length(D.dq.bufq) ) ;
 					}
 					sendBuffer = TRUE ;
 					dcvBufContainerFree(dv) ;
@@ -234,13 +245,16 @@ int main( int argc, char** argv )
 				}
 			}
 		}
-		if (ctr >= 500) {
-			walkPipeline(D.pipeline,0) ;
-			ctr = 0 ;
-			terminate = TRUE ;
+		if (terminate && g_queue_is_empty(D.dq.bufq)) {
+			GstEvent *gevent = gst_event_new_eos() ;
+			GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.dsrc),"src") ;
+			g_assert(spad) ;
+			if (gst_pad_push_event(spad,gevent) != TRUE) {
+				g_print("Sorry, couldn't push eos event, even though I am done\n") ;
+			}
 		}
-	} while (terminate == FALSE && D.eos == FALSE) ;
-	g_print("Exiting!\n") ;
+	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
+	sleep(5) ;
 }
 
 
@@ -270,4 +284,32 @@ static void processbuffer(void *A, int isz, void *B, int osz)
 	*pB = 0;
 	for (i=0; i<icnt; i++)
 		*pB = *pB^*pA++ ;
+}
+
+static GstPadProbeReturn cb_have_data_bl (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
+{
+  GstBufferList *bufferlist;
+  gsize size;
+  guint *pbuffercount = (guint *)user_data ;
+
+  bufferlist = GST_PAD_PROBE_INFO_BUFFER_LIST (info);
+  size = gst_buffer_list_calculate_size(bufferlist) ;
+  (*pbuffercount) += gst_buffer_list_length(bufferlist) ;
+  g_print ("BufferList of size %u (%u)\n",size,*pbuffercount) ;
+
+  return GST_PAD_PROBE_OK;
+}
+static GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
+{
+  GstBuffer *buffer;
+  gsize size;
+  guint *pbuffercount = (guint *)user_data ;
+
+  buffer = GST_PAD_PROBE_INFO_BUFFER (info);
+  size = gst_buffer_get_size(buffer) ;
+  (*pbuffercount) += 1 ;
+  g_print ("Buffer of size %u (%u)\n",size,*pbuffercount) ;
+  gst_buffer_unref(buffer) ;
+
+  return GST_PAD_PROBE_OK;
 }

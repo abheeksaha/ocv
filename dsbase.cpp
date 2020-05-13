@@ -458,15 +458,3 @@ static void demuxpadRemoved(GstElement *s, guint pt, GstPad *P, gpointer d)
 	g_print("Received pad removed signal for pt=%d, %s\n",pt, GST_PAD_NAME(P)) ;
 }
 
-GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
-{
-  GstMapInfo map;
-  guint16 *ptr, t;
-  GstBuffer *buffer;
-
-  buffer = GST_PAD_PROBE_INFO_BUFFER (info);
-  dcv_bufq_t *dp = (dcv_bufq_t *)user_data ;
-  GstBuffer * newbuf = gst_buffer_copy_deep(buffer) ;
-  g_queue_push_tail(dp->bufq,gst_buffer_ref(newbuf)) ;
-  return GST_PAD_PROBE_OK;
-}
