@@ -1,7 +1,7 @@
-CC = gcc -g
-CPP = g++ -g
-LD = gcc -g
-LDCPP = g++ -g
+CC = gcc -O2
+CPP = g++ -O2
+LD = gcc -O2
+LDCPP = g++ -O2
 SRCHOME=/home/ggne0015/src/
 OPENCV_DIR=$(SRCHOME)/opencv-4.1.1
 GSTREAMER_DIR=$(SRCHOME)/gstreamer/

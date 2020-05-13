@@ -277,9 +277,10 @@ int main( int argc, char** argv )
 				if ( (dataFrameContainer = (dcv_BufContainer_t *)g_queue_pop_head(D.olddataqueue.bufq)) == NULL) {
 				       g_print("No data frame ...very strange\n") ;
 				}
+
 				if ( ((vfmatch = dcvFindMatchingContainer(D.videoframequeue.bufq,dataFrameContainer)) == -1) &&
 			       	      (vfmatch >= g_queue_get_length(D.videoframequeue.bufq))){
-					g_print("No match found: vfmatch=%d\n",vfmatch) ;
+					g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",vfmatch, g_queue_get_length(D.videoframequeue.bufq), g_queue_get_length(D.olddataqueue.bufq)) ;
 					if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
 						dcvBufContainerFree(dataFrameContainer) ;
 						free(dataFrameContainer) ;
@@ -305,7 +306,7 @@ int main( int argc, char** argv )
 						GstBuffer *databuf = gst_buffer_new_allocate(NULL,getTagSize(),NULL) ;
 						dmem = gst_buffer_get_all_memory(databuf) ;
 						if (gst_memory_map(dmem, &dmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
-						g_print("Input:%d,%d o/p:%d..\n",vmap.size,odmap.size, dmap.size) ;
+						g_print("Input:%d,%d o/p:%d..",vmap.size,odmap.size, dmap.size) ;
 						pd = (guint64 *)dmap.data;
 						processbuffer(vmap.data,vmap.size,odmap.data,odmap.size,dmap.data,dmap.size) ;
 						gst_memory_unmap(dmem,&dmap);

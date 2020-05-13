@@ -168,7 +168,7 @@ void dcvBufContainerFree(dcv_BufContainer_t *P)
 	return ;
 }
 
-gboolean dcvMatchBuffer(void *B, int osz, void *A, int isz)
+gboolean dcvMatchBuffer(void *A, int osz, void *B, int isz)
 {
 	gboolean retval = FALSE ;
 	int i;
@@ -176,8 +176,8 @@ gboolean dcvMatchBuffer(void *B, int osz, void *A, int isz)
 	tag_t *pd = (tag_t *)B ;
 	u32 hsh=0;
 	int sequence[1024];
-	g_assert(pd->seqsize < 1024) ;
 //	g_print("Seq of size %d: count(%u) tstmp=%u hash=%u: ", pd->seqsize,pd->count,pd->tstmp,pd->checksum)  ;
+	g_assert(pd->seqsize < 1024) ;
 	g_assert(pd->seqsize == RSEQSIZE) ;
 	for (i=0; i<pd->seqsize; i++) {
 		sequence[i] = pd->seq[i] ;
@@ -192,21 +192,18 @@ gboolean dcvMatchBuffer(void *B, int osz, void *A, int isz)
 	return retval ;
 }
 
-gint dcvMatchContainer (gconstpointer A, gconstpointer B )
+gint dcvMatchContainer (gconstpointer vq, gconstpointer tag )
 {
-	dcv_BufContainer_t *pA = (dcv_BufContainer_t *)A ;
-	dcv_BufContainer_t *pB = (dcv_BufContainer_t *)B ;
+	dcv_BufContainer_t *pA = (dcv_BufContainer_t *)vq ;
+	tag_t *pB = (tag_t *)tag ;
 	gboolean retval=FALSE ;
 	GstMemory *vmem,*odmem;
 	GstMapInfo vmap,odmap;
 
-	odmem = gst_buffer_get_all_memory(pA->nb) ;
-	if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
-	vmem = gst_buffer_get_all_memory(pB->nb) ;
+	vmem = gst_buffer_get_all_memory(pA->nb) ;
 	if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
-	retval = dcvMatchBuffer((void *)vmap.data,(int)vmap.size,(void *)odmap.data,(int)odmap.size) ;
+	retval = dcvMatchBuffer((void *)vmap.data,(int)vmap.size,(void *)pB,sizeof(tag_t)) ;
 	gst_memory_unmap(vmem,&vmap) ;
-	gst_memory_unmap(odmem,&odmap) ;
 	if (retval == TRUE) return 0 ;
 	else return 1 ;
 }
@@ -214,11 +211,26 @@ gint dcvMatchContainer (gconstpointer A, gconstpointer B )
 int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d)
 {
 	GList *p ;
-	if (q==NULL) return -1 ;
-	if ((p = g_queue_find_custom(q,d,dcvMatchContainer)) == NULL) 
-		return -1 ;
+	tag_t T ;
+	int rval=-1 ;
+	if (q==NULL) goto GETOUT;
 	else
-		return g_queue_link_index(q,p) ;
+	{
+		GstMemory *tmem;
+		GstMapInfo tmap;
+		tmem = gst_buffer_get_all_memory(d->nb) ;
+		if (gst_memory_map(tmem, &tmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
+		memcpy((void *)&T,tmap.data,sizeof(tag_t)) ;
+		g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T.count,T.tstmp,T.seqsize) ;
+
+		if ((p = g_queue_find_custom(q,(void *)&T,dcvMatchContainer)) == NULL) 
+			rval = -1 ;
+		else
+			rval =  g_queue_link_index(q,p) ;
+		gst_memory_unmap(tmem, &tmap) ;
+	}
+GETOUT:
+	return rval ;
 }
 
 int getTagSize()
