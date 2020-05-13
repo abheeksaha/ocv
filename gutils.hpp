@@ -6,7 +6,8 @@
 
 typedef struct {
 	GQueue *bufq;
-	gboolean hasdata;
+	struct timeval lastData;
+	struct timezone tz;
 } dcv_bufq_t ;
 
 typedef struct {
@@ -39,6 +40,7 @@ gint dcvMatchContainer (gconstpointer A, gconstpointer B ) ;
 int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d) ;
 void dcvBufContainerFree(dcv_BufContainer_t *) ;
 gint dcvLengthOfStay(dcv_BufContainer_t *k) ;
+gint dcvTimeDiff(struct timeval t1, struct timeval t2) ;
 
 void eosRcvd(GstAppSink *slf, gpointer D) ;
 gboolean listenToBus(GstElement *pipeline, GstState * cstate, GstState *ostate, unsigned int tms) ;

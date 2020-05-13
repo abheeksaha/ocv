@@ -68,9 +68,13 @@ int main( int argc, char** argv )
 	gboolean dumpPipe = FALSE ;
 	gboolean stage1 = FALSE ;
 	gboolean tx=TRUE ;
-	help();
-	guint ctr=0;
+	gint vfmatch=0;
 
+	guint ctr=0;
+	struct timeval lastCheck;
+	struct timezone tz;
+
+	help();
 	while ((ch = getopt(argc, argv, "Np:ds:")) != -1) {
 		if (ch == 'p')
 		{
@@ -267,13 +271,20 @@ int main( int argc, char** argv )
 			gpointer dataFrameWaiting = NULL ;
 			GstClockTime vframenum, vframeref;
 			guint64 *pd;
-			gint vfmatch;
 			dcv_BufContainer_t *dataFrameContainer;
+			struct timeval nowTime ;
+			struct timezone nz;
 
 			while (!g_queue_is_empty(D.videoframequeue.bufq)&& !g_queue_is_empty(D.olddataqueue.bufq)) 
 			{
 				int stay=0;
 				ctr = 0 ;
+				if (vfmatch == -1) {
+					/** We failed last time, see if something has changed **/
+					if ((dcvTimeDiff(D.videoframequeue.lastData,lastCheck) <= 0) &&
+					    (dcvTimeDiff(D.olddataqueue.lastData,lastCheck) <= 0) )
+						break ;
+				}
 				if ( (dataFrameContainer = (dcv_BufContainer_t *)g_queue_pop_head(D.olddataqueue.bufq)) == NULL) {
 				       g_print("No data frame ...very strange\n") ;
 				}
@@ -289,9 +300,10 @@ int main( int argc, char** argv )
 					else 
 						g_queue_push_tail(D.olddataqueue.bufq,dataFrameContainer) ;
 
+					gettimeofday(&lastCheck,&tz) ;
+					g_print("Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
 					continue ;
 				}
-				else
 				{
 					dataFrameWaiting = dataFrameContainer->nb;
 					videoFrameWaiting = ((dcv_BufContainer_t *)g_queue_pop_nth(D.videoframequeue.bufq,vfmatch))->nb ;
@@ -322,6 +334,8 @@ int main( int argc, char** argv )
 					gst_buffer_unref(videoFrameWaiting);
 					gst_buffer_unref(dataFrameWaiting);
 				}
+				/** Clean up the video frame queue **/
+
 			}
 		}
 		if (ctr == 5000)

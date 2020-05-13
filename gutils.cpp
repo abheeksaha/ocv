@@ -152,6 +152,13 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 	g_print("Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
 }
 
+gint dcvTimeDiff(struct timeval t1, struct timeval t2)
+{
+	gint t = 1000000*(t1.tv_sec - t2.tv_sec) ;
+	t += t1.tv_usec - t2.tv_usec ;
+	return t ;
+}
+
 gint dcvLengthOfStay(dcv_BufContainer_t *k)
 {
 	struct timeval tn;
@@ -296,7 +303,8 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 			gst_buffer_ref(bcnt->nb) ;
 			gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
 			g_queue_push_tail(D->bufq,bcnt) ;
-			g_print("New Sample in %s: %u\n",GST_ELEMENT_NAME(slf),g_queue_get_length(D->bufq)) ;
+			gettimeofday(&D->lastData,&D->tz) ;
+			g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),D->lastData.tv_sec, D->lastData.tv_usec,g_queue_get_length(D->bufq)) ;
 			return GST_FLOW_OK;
 		}
 		else

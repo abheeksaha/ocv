@@ -53,19 +53,19 @@ int main( int argc, char** argv )
 	extern char *optarg;
 	static guint ctr=0;
 	guint txport = 50018;
-	gboolean dumpPipe = FALSE ;
+	gboolean dotx = TRUE ;
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	help();
 
-	while ((ch = getopt(argc, argv, "p:d")) != -1) {
+	while ((ch = getopt(argc, argv, "p:t")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
 		}
-		if (ch == 'd') 
+		if (ch == 't') 
 		{
-			dumpPipe = TRUE ;
+			dotx = FALSE ;
 		}
 	}
 	gst_init(&argc, &argv) ;
@@ -175,11 +175,6 @@ int main( int argc, char** argv )
 	g_print("Returned latency %.4g ms \n",
 			(double)dp/1000000.0) ;
 	}
-	if (dumpPipe == TRUE) {
-		g_print("Dumping pipeline\n") ;
-		walkPipeline(D.pipeline,1) ;
-		return (4) ;
-	}
 
 	ret = gst_element_set_state(GST_ELEMENT_CAST(D.vsink),GST_STATE_PLAYING) ;
 	if (ret == GST_STATE_CHANGE_FAILURE) {
@@ -227,8 +222,12 @@ int main( int argc, char** argv )
 					gst_memory_unmap(vmem,&vmap);
 
 // Add a message dat
-					GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
-					g_print("Pushing data buffer...(%d)",ret ) ;
+					if (dotx) 
+					{
+						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
+
+						g_print("Pushing data buffer...(%d)",ret ) ;
+					}
 					sendBuffer = TRUE ;
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
