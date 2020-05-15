@@ -7,6 +7,9 @@
 #include <gst/app/app.h>
 #include "gutils.hpp"
 #include "rseq.hpp"
+
+bufferCounter_t inbc,outbc;
+extern gboolean terminate ;
 gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, unsigned int tms)
 {
 	GstBus *bus;
@@ -15,7 +18,7 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
 	gboolean terminate = FALSE ;
 	bus = gst_element_get_bus (pipeline);
 	msg = gst_bus_timed_pop_filtered (bus, tms*GST_MSECOND,
-		GST_MESSAGE_STATE_CHANGED | GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
+		GST_MESSAGE_STATE_CHANGED | GST_MESSAGE_ERROR | GST_MESSAGE_EOS | GST_MESSAGE_QOS);
 
     /* Parse message */
     if (msg != NULL) {
@@ -45,6 +48,9 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
                 gst_element_state_get_name (*ostate), gst_element_state_get_name (*nstate));
           }
           break;
+	case GST_MESSAGE_QOS:
+	  g_print("Received a QoS message from : %s", GST_ELEMENT_NAME(GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)))) ; 
+	  break ;
         default:
           /* We should not reach here */
           g_printerr ("Unexpected message received.\n");
@@ -261,9 +267,15 @@ void eosRcvd(GstAppSink *slf, gpointer D)
 {
 	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
 	gboolean *eos = (gboolean *)D ;
-	*eos = FALSE ;
+	*eos = TRUE ;
 }
 
+void eosRcvdSrc(GstAppSrc *slf, gpointer D)
+{
+	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	gboolean *eos = (gboolean *)D ;
+	*eos = TRUE ;
+}
 GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 {
 	GstCaps * dbt = NULL ;
@@ -335,9 +347,50 @@ void dataFrameStop(GstAppSrc *s, gpointer data)
 	}
 }
 
+/** Probe functions **/
+GstPadProbeReturn cb_have_data_bl (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
+{
+  GstBufferList *bufferlist;
+  gsize size;
+  bufferCounter_t *pbc = (bufferCounter_t *)user_data ;
+
+  bufferlist = GST_PAD_PROBE_INFO_BUFFER_LIST (info);
+  pbc->bytecount += gst_buffer_list_calculate_size(bufferlist) ;
+  pbc->buffercount += gst_buffer_list_length(bufferlist) ;
+ // g_print ("(%s): BufferList of size %u (%u)\n",GST_ELEMENT_NAME(gst_pad_get_parent_element(pad)),size,*pbuffercount) ;
+
+  return GST_PAD_PROBE_OK;
+}
+GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
+{
+  GstBuffer *buffer;
+  gsize size;
+  bufferCounter_t *pbc = (bufferCounter_t *)user_data ;
+
+  buffer = GST_PAD_PROBE_INFO_BUFFER (info);
+  pbc->bytecount += gst_buffer_get_size(buffer) ;
+  pbc->buffercount += 1 ;
+  return GST_PAD_PROBE_OK;
+}
+
+void dcvAttachBufferCounterOut(GstElement *e, bufferCounter_t *bc)
+{
+	GstPad *sinkpad = gst_element_get_static_pad(e,"sink") ; g_assert(sinkpad) ;
+  	gst_pad_add_probe (sinkpad, GST_PAD_PROBE_TYPE_BUFFER, (GstPadProbeCallback) cb_have_data, bc, NULL); 
+  	gst_pad_add_probe (sinkpad, GST_PAD_PROBE_TYPE_BUFFER_LIST, (GstPadProbeCallback) cb_have_data_bl, bc, NULL); 
+	gst_object_unref(sinkpad) ;
+}
+
+void dcvAttachBufferCounterIn(GstElement *e, bufferCounter_t *bc)
+{
+	GstPad *srcpad = gst_element_get_static_pad(e,"src") ; g_assert(srcpad) ;
+  	gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BUFFER, (GstPadProbeCallback) cb_have_data, bc, NULL); 
+  	gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BUFFER_LIST, (GstPadProbeCallback) cb_have_data_bl, bc, NULL); 
+	gst_object_unref(srcpad) ;
+}
 
 /** Configuration Functions **/
-gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs )
+gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs, src_eos_fn_t eosRcvd, void *d_eos )
 {
 	if (dsrc == NULL) return FALSE ;
 	g_object_set(G_OBJECT(dsrc), "format", GST_FORMAT_TIME,NULL) ;
@@ -349,6 +402,7 @@ gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_d
 	g_object_set(G_OBJECT(dsrc), "min-percent", 50 ,NULL) ;
 	g_signal_connect(G_OBJECT(dsrc), "need-data", G_CALLBACK(src_dfw), dfw) ;
 	g_signal_connect(G_OBJECT(dsrc), "enough-data", G_CALLBACK(src_dfs), dfs) ;
+	g_signal_connect(GST_APP_SRC_CAST(dsrc),"end-of-stream", eosRcvd,d_eos) ;
 	return TRUE ;
 }
 
@@ -362,4 +416,20 @@ gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_sa
 	g_object_set(G_OBJECT(vsink), "drop", FALSE, NULL) ;
 	g_object_set(G_OBJECT(vsink), "wait-on-eos", TRUE, NULL) ;
 	return TRUE;
+}
+
+void bufferCounterInit(bufferCounter_t *ic, bufferCounter_t *oc )
+{
+	oc->bytecount = oc->buffercount = 0 ;
+	ic->bytecount = ic->buffercount = 0 ;
+	signal(SIGHUP, bufferCounterDump) ;
+	signal(SIGINT, bufferCounterDump) ;
+	signal(SIGUSR1, bufferCounterDump) ;
+}
+void bufferCounterDump(int signalnum)
+{
+	extern gboolean sigrcvd;
+	g_print("Received %d: inbuffer=%u inbytes=%u outbuffer=%u outbytes=%u\n",signalnum,
+			inbc.buffercount,inbc.bytecount,outbc.buffercount,outbc.bytecount) ;
+	sigrcvd = TRUE ;
 }

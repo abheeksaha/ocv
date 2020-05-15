@@ -10,6 +10,9 @@
 #include "gutils.hpp"
 static void help()
 {
+	g_print("Usage: gdyn -p <port num for tx: default 50018> \
+ -t <do not transmit the data buf> \
+ -n <Take input from net, not from file\n" ) ;
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -25,22 +28,31 @@ typedef struct {
 	GstElement *vp9d;
 	srcstate_e dsrcstate;
 	gboolean eos;
+	gboolean eosDsrc ;
 	unsigned long vsinkq;
 	dcv_bufq_t dq;
 } dpipe_t ;
 
-
 #include <getopt.h>
-
 #include "gutils.hpp"
 #include "rseq.hpp"
+#include <signal.h>
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
-static GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
-static GstPadProbeReturn cb_have_data_bl (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
 extern void walkPipeline(GstBin *bin) ;
+void bufDump(int signalnum) ;
 
-static char pipedesc[] = "filesrc location=v1.webm ! matroskademux name=mdmx ! queue ! tee name=tpoint \
-			  rtpmux name=mux ! udpsink name=usink \
+extern bufferCounter_t inbc,outbc;
+volatile gboolean terminate ;
+volatile gboolean sigrcvd = FALSE ;
+static char fdesc[] = "filesrc location=v1.webm ! queue ! matroskademux name=mdmx ! queue name=vsrc ! tee name=tpoint \
+			  rtpmux name=mux ! queue ! udpsink name=usink \
+			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
+				  tpoint2.src_0 ! queue ! fakesink \
+				  tpoint2.src_1 ! queue ! appsink name=vsink \
+			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
+			  appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
+			  rtpmux name=mux ! queue ! udpsink name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
 				  tpoint2.src_0 ! queue ! fakesink \
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
@@ -55,14 +67,14 @@ int main( int argc, char** argv )
 	char ch;
 	extern char *optarg;
 	static guint ctr=0;
+	char *pipedesc = fdesc;
 	guint txport = 50018;
 	gboolean dotx = TRUE ;
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
-	guint buffercount = 0 ;
-	help();
+	bufferCounterInit(&inbc,&outbc) ;
 
-	while ((ch = getopt(argc, argv, "p:t")) != -1) {
+	while ((ch = getopt(argc, argv, "p:tnh")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -71,6 +83,8 @@ int main( int argc, char** argv )
 		{
 			dotx = FALSE ;
 		}
+		if (ch == 'h') { help(); exit(3) ; }
+		if (ch == 'n') { g_print("Switching to network mode\n") ; pipedesc = ndesc ; }
 	}
 	gst_init(&argc, &argv) ;
 	g_print("Using txport = %u\n",txport) ;
@@ -90,19 +104,29 @@ int main( int argc, char** argv )
 		exit(4) ;
 	}
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
-	D.mdmx = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
 	D.tpt  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint") ;
 	D.vp9d  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vp9d") ;
+	if (pipedesc == fdesc) D.mdmx  = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
+	else D.mdmx = NULL ;
 	D.eos = FALSE ;
+	D.eosDsrc = FALSE ;
 	D.vsinkq=0 ;
 	D.dq.bufq = g_queue_new() ;
 	D.dsrcstate = G_BLOCKED;
-	g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
+	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
 
 	{
+		gchar clientstring[1024] ;
+		sprintf(clientstring,"192.168.1.71:%u",txport) ;
+		g_print("Setting destination to %s\n",clientstring) ;
 		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
+#if 1
 		g_object_set(G_OBJECT(udpsink),"host", "192.168.1.71", NULL) ; 
 		g_object_set(G_OBJECT(udpsink),"port", txport , NULL) ; 
+#else
+		g_object_set(G_OBJECT(udpsink),"clients", clientstring , NULL) ; 
+#endif
+		g_object_set(G_OBJECT(udpsink),"qos", TRUE , NULL) ; 
 	}
 	{
 		g_object_set(G_OBJECT(D.tpt), "pull-mode", GST_TEE_PULL_MODE_SINGLE, NULL) ;
@@ -117,10 +141,18 @@ int main( int argc, char** argv )
 //			gst_pad_set_caps(rtpsink1, gst_caps_new_simple ("application/x-rtp", NULL)) ;
 			g_print("rtpsink2 likes caps: %s\n", gst_caps_to_string(u)) ;
 //			gst_pad_set_caps(rtpsink2,gst_caps_new_simple ("application/x-rtp", NULL)) ;
-			srcpad = gst_element_get_static_pad (ge, "src");
-  			gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BUFFER, (GstPadProbeCallback) cb_have_data, &buffercount, NULL); 
-  			gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BUFFER_LIST, (GstPadProbeCallback) cb_have_data_bl, &buffercount, NULL); 
-			gst_object_unref (srcpad);
+		}
+		{
+			GstElement *ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ; g_assert(ge) ;
+			GstElement *ige;
+			dcvAttachBufferCounterOut(ge, &outbc) ;
+			if (pipedesc == ndesc) {
+				ige = gst_bin_get_by_name(GST_BIN(D.pipeline),"usrc") ; g_assert(ige) ;
+			}
+			else {
+				ige = gst_bin_get_by_name(GST_BIN(D.pipeline),"vsrc") ; g_assert(ige) ;
+			}
+			dcvAttachBufferCounterIn(ige,&inbc) ;
 		}
 #if VP9PAY
 		{
@@ -140,7 +172,7 @@ int main( int argc, char** argv )
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
 //		  	GstCaps *caps = gst_caps_new_simple ("application/x-raw", NULL);
 //			gst_app_src_set_caps(D.dsrc,caps) ;
-			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eosDsrc) ;
 		}
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 
@@ -192,8 +224,8 @@ int main( int argc, char** argv )
 		return -1;
 	}
 
-	gboolean terminate = FALSE ;
 	GstState oldstate,newstate=GST_STATE_NULL ;
+	terminate = FALSE ;
 	do {
 		GstBuffer *databuf ;
 		GstBuffer *v = NULL ;
@@ -201,9 +233,9 @@ int main( int argc, char** argv )
 		GstSegment *dbseg = NULL ;
 		static gboolean sendBuffer = TRUE ;
 		static guint vbufsnt = 0;
-		gboolean pipeterminate = FALSE ;
 
-		terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
+		if (terminate == FALSE) 
+			terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
 #if 0
 		if (validstate(newstate) && validstate(oldstate) && newstate != oldstate )
 			g_print("New:%s Old:%s\n",
@@ -237,7 +269,8 @@ int main( int argc, char** argv )
 					{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 
-						g_print("Pushing data buffer...(%d)...remaining(%u)\n",ret,g_queue_get_length(D.dq.bufq) ) ;
+						g_print("Pushing data buffer...(%d)...remaining(%u)\n",
+								ret,g_queue_get_length(D.dq.bufq)) ;
 					}
 					sendBuffer = TRUE ;
 					dcvBufContainerFree(dv) ;
@@ -245,16 +278,33 @@ int main( int argc, char** argv )
 				}
 			}
 		}
-		if (terminate && g_queue_is_empty(D.dq.bufq)) {
+		if ((D.eosDsrc == TRUE  && g_queue_is_empty(D.dq.bufq)) || terminate == TRUE) {
 			GstEvent *gevent = gst_event_new_eos() ;
 			GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.dsrc),"src") ;
 			g_assert(spad) ;
 			if (gst_pad_push_event(spad,gevent) != TRUE) {
 				g_print("Sorry, couldn't push eos event, even though I am done\n") ;
 			}
+			gst_event_unref(gevent) ;
 		}
+		if (sigrcvd) {
+			guint64 bs=0,bts=0;
+			GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
+			g_object_get(udpsink, "bytes-served", &bs, NULL) ;
+			g_object_get(udpsink, "bytes-to-serve", &bts, NULL) ;
+			g_print("UDP Sink stats: Bytes Served: %lu, to serve=%lu\n", bs,bts) ;
+			sigrcvd = FALSE ;
+		}
+
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
-	sleep(5) ;
+	{
+		guint64 bs=0,bts=0;
+		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
+		g_object_get(udpsink, "bytes-served", &bs, NULL) ;
+		g_object_get(udpsink, "bytes-to-serve", &bts, NULL) ;
+		g_print("UDP Sink stats: Bytes Served: %lu, to serve=%lu\n", bs,bts) ;
+	}
+	bufferCounterDump(2) ;
 }
 
 
@@ -286,30 +336,3 @@ static void processbuffer(void *A, int isz, void *B, int osz)
 		*pB = *pB^*pA++ ;
 }
 
-static GstPadProbeReturn cb_have_data_bl (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
-{
-  GstBufferList *bufferlist;
-  gsize size;
-  guint *pbuffercount = (guint *)user_data ;
-
-  bufferlist = GST_PAD_PROBE_INFO_BUFFER_LIST (info);
-  size = gst_buffer_list_calculate_size(bufferlist) ;
-  (*pbuffercount) += gst_buffer_list_length(bufferlist) ;
-  g_print ("BufferList of size %u (%u)\n",size,*pbuffercount) ;
-
-  return GST_PAD_PROBE_OK;
-}
-static GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data)
-{
-  GstBuffer *buffer;
-  gsize size;
-  guint *pbuffercount = (guint *)user_data ;
-
-  buffer = GST_PAD_PROBE_INFO_BUFFER (info);
-  size = gst_buffer_get_size(buffer) ;
-  (*pbuffercount) += 1 ;
-  g_print ("Buffer of size %u (%u)\n",size,*pbuffercount) ;
-  gst_buffer_unref(buffer) ;
-
-  return GST_PAD_PROBE_OK;
-}

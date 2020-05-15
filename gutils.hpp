@@ -26,12 +26,13 @@ typedef unsigned int u32 ;
 
 typedef void (*src_dfw_fn_t)(GstAppSrc *, guint, gpointer) ;
 typedef void (*src_dfs_fn_t)(GstAppSrc *, gpointer) ;
-gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs ) ;
 
 typedef void (*sink_preroll_fn_t)(GstAppSink *, gpointer) ;
 typedef void (*sink_sample_fn_t)(GstAppSink *, gpointer) ;
 typedef void (*sink_eos_fn_t)(GstAppSink *, gpointer) ;
+typedef void (*src_eos_fn_t)(GstAppSrc *, gpointer) ;
 gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_samp, sink_preroll_fn_t sink_pre, void *d_pre, sink_eos_fn_t eosRcvd, void *d_eos)  ;
+gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs, src_eos_fn_t eosRcvd, void *d_eos ) ;
 
 /** Buffer Functions **/
 void dcvTagBuffer(void *A, int isz, void *B, int osz) ;
@@ -43,6 +44,7 @@ gint dcvLengthOfStay(dcv_BufContainer_t *k) ;
 gint dcvTimeDiff(struct timeval t1, struct timeval t2) ;
 
 void eosRcvd(GstAppSink *slf, gpointer D) ;
+void eosRcvdSrc(GstAppSrc *slf, gpointer D) ;
 gboolean listenToBus(GstElement *pipeline, GstState * cstate, GstState *ostate, unsigned int tms) ;
 void testStats(GstElement *tst) ;
 GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d) ;
@@ -51,6 +53,21 @@ void walkPipeline(GstElement *p, guint level) ;
 void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
 void dataFrameStop(GstAppSrc *s,  gpointer data) ;
 
+
+typedef struct {
+	guint buffercount;
+	guint bytecount;
+} bufferCounter_t ;
+/** Probe functions **/
+GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
+GstPadProbeReturn cb_have_data_bl (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
+void dcvAttachBufferCounterIn(GstElement *e, bufferCounter_t *oc) ;
+void dcvAttachBufferCounterOut(GstElement *e, bufferCounter_t *oc) ;
+
 int getTagSize(void) ;
+
+
+void bufferCounterInit(bufferCounter_t *i, bufferCounter_t *o) ;
+void bufferCounterDump(int signalnum) ;
 
 #endif

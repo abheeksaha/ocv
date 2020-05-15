@@ -19,6 +19,8 @@ static void help()
 }
 
 extern gboolean listenToBus(GstElement *pipeline, GstState * playing, GstState *oldstate, unsigned int tms) ;
+gboolean terminate ;
+gboolean sigrcvd ;
 
 typedef struct {
 	GstElement *pipeline;
@@ -47,6 +49,7 @@ static char pipedesc[] = "udpsrc name=usrc address=192.168.1.71 port=50019 ! rtp
 rpdmx.src_96 ! rtpvp9depay name=vp9d ! queue ! filesink location=op.webm \
 rpdmx.src_102 ! application/x-rtp,medial=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstdepay name=gstd ! queue ! appsink name=nxtrcv" ;
 #endif
+
 
 
 int main( int argc, char** argv )

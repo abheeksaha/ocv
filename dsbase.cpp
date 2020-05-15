@@ -29,6 +29,7 @@ typedef struct {
 	srcstate_e dsrcstate;
 	gboolean deos;
 	gboolean veos;
+	gboolean eosDsrc;
 	/** Data holding elements **/
 	dcv_bufq_t dataqueue;
 	dcv_bufq_t olddataqueue;
@@ -45,6 +46,8 @@ static void paddEventRemoved(GstElement *s, GstPad *p, gpointer d) ;
 
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
 
+gboolean terminate =FALSE;
+gboolean sigrcvd = FALSE ;
 static char srcdesc[] = "\
 udpsrc name=usrc address=192.168.1.71 port=50018 ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! rtpvp9depay name=vp9d ! tee name=tpoint \
@@ -56,6 +59,8 @@ rpdmx.src_102 ! rtpgstdepay name=rgpd ! appsink name=dsink \
 tpoint.src_1 ! queue ! rtpvp9pay ! mux.sink_0 \
 appsrc name=dsrc !  application/x-rtp,medial=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
+
+extern bufferCounter_t inbc,outbc;
 int main( int argc, char** argv )
 {
 
@@ -95,6 +100,7 @@ int main( int argc, char** argv )
 	}
 	gst_init(&argc, &argv) ;
 	g_print("Using txport = %u\n",txport) ;
+	bufferCounterInit(&inbc,&outbc) ;
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc ;
 
@@ -109,6 +115,7 @@ int main( int argc, char** argv )
 	D.videoframequeue.bufq = g_queue_new() ;
 	D.deos = FALSE ;
 	D.veos = FALSE ;
+	D.eosDsrc = FALSE ;
 	D.dsrcstate = G_BLOCKED;
 
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
@@ -119,7 +126,7 @@ int main( int argc, char** argv )
 	gerr = NULL ;
 	{
 		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-		g_object_set(G_OBJECT(udpsink),"buffer-size", 1024*1024 , NULL) ; 
+		dcvAttachBufferCounterOut(udpsink,&outbc) ;
 	}
 	{
 		{
@@ -154,7 +161,7 @@ int main( int argc, char** argv )
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.videoframequeue, sink_newpreroll, &D.videoframequeue,eosRcvd, &D.veos) ; 
 			dcvConfigAppSink(D.dsink,sink_newsample, &D.olddataqueue, sink_newpreroll, &D.olddataqueue,eosRcvd, &D.deos) ; 
-			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate, eosRcvdSrc, &D.eosDsrc) ;
 		}
 	/** Saving the depayloader pads **/
 		{
@@ -205,6 +212,7 @@ int main( int argc, char** argv )
 //			g_object_set(G_OBJECT(usrc),"address", "192.168.1.71", NULL) ; 
 			g_object_set(G_OBJECT(usrc),"caps", srccaps, NULL) ; 
 			g_object_set(G_OBJECT(usrc),"buffer-size", 100000, NULL) ; 
+			dcvAttachBufferCounterIn(usrc,&inbc) ;
 		}
 #if 1
 		{
@@ -250,7 +258,7 @@ int main( int argc, char** argv )
 	gst_element_set_state(GST_ELEMENT_CAST(D.vsink),GST_STATE_PLAYING) ;
 	gst_element_set_state(GST_ELEMENT_CAST(D.dsink),GST_STATE_PLAYING) ;
 
-	gboolean terminate = FALSE ;
+	terminate = FALSE ;
 	GstState inputstate,oldstate ;
 	do {
 		GstSample *dgs = NULL;
