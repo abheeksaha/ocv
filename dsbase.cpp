@@ -5,6 +5,7 @@
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
 #include <plugins/elements/gsttee.h>
+#include "gsftc.hpp"
 #include "gutils.hpp"
 #include "rseq.hpp"
 
@@ -20,6 +21,8 @@ typedef struct {
 	GstElement *vdec;
 	GstAppSink *vsink;
 	GstAppSink *dsink;
+	GstAppSrc *usrc ;
+	GstAppSink *usink ;
 	/** Input elements **/
 	GstCaps *vcaps,*dcaps;
 	/* Output elements **/
@@ -34,6 +37,7 @@ typedef struct {
 	dcv_bufq_t dataqueue;
 	dcv_bufq_t olddataqueue;
 	dcv_bufq_t videoframequeue;
+	dcv_ftc_t *ftc;
 } dpipe_t ;
 #define MAX_DATA_BUF_ALLOWED 240
 
@@ -49,12 +53,12 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
 gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static char srcdesc[] = "\
-udpsrc name=usrc address=192.168.1.71 port=50018 ! rtpptdemux name=rpdmx \
+appsrc name=usrc is-live=true ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! rtpvp9depay name=vp9d ! tee name=tpoint \
 tpoint.src_0 ! queue ! avdec_vp9 name=vdec ! videoconvert ! videoscale ! tee name=tpoint2 \
 	tpoint2.src_0 ! queue ! fakesink \
 	tpoint2.src_1 ! queue ! appsink name=vsink \
-rtpmux name=mux ! queue !  udpsink name=usink host=192.168.1.71 port=50019 \
+rtpmux name=mux ! queue !  appsink name=usink  \
 rpdmx.src_102 ! rtpgstdepay name=rgpd ! appsink name=dsink \
 tpoint.src_1 ! queue ! rtpvp9pay ! mux.sink_0 \
 appsrc name=dsrc !  application/x-rtp,medial=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
@@ -69,7 +73,8 @@ int main( int argc, char** argv )
 	GError *gerr = NULL;
 	char ch;
 	extern char *optarg;
-	guint txport = 50018;
+	guint txport = 50019;
+	guint rxport = 50018;
 	gboolean dumpPipe = FALSE ;
 	gboolean stage1 = FALSE ;
 	gboolean tx=TRUE ;
@@ -80,19 +85,14 @@ int main( int argc, char** argv )
 	struct timezone tz;
 
 	help();
-	while ((ch = getopt(argc, argv, "Np:ds:")) != -1) {
+	while ((ch = getopt(argc, argv, "Np:dr:")) != -1) {
 		if (ch == 'p')
 		{
-			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
+			txport = atoi(optarg) ; g_print("Setting txport:%d\n",txport) ; 
 		}
-		if (ch == 'd') 
+		if (ch == 'r')
 		{
-			dumpPipe = TRUE ;
-		}
-		if (ch == 's') {
-			if (*optarg == '1') {
-				stage1 = TRUE ;
-			}
+			rxport = atoi(optarg) ; g_print("Setting rxport:%d\n",rxport) ; 
 		}
 		if (ch == 'N') {
 			tx = FALSE ;
@@ -120,13 +120,29 @@ int main( int argc, char** argv )
 
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.dsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsink")) ;
+	/** Configure the end-points **/
+	{
+		char clientstring[1024];
+		sprintf(clientstring,"192.168.1.71") ;
+		g_print("Setting destination to %s:%u\n",clientstring,txport) ;
+		D.ftc = dcvFtConnInit(clientstring,rxport,clientstring,txport) ;
+		if (D.ftc == NULL) {
+			g_print("Something went wrong in initialization\n") ;
+			exit(3) ;
+		}
+		if (dcvFtConnStart(D.ftc) == FALSE) {
+			g_print("Something happened during connection start\n") ;
+			exit(3) ;
+		}
+	}
 
 	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	gerr = NULL ;
 	{
-		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-		dcvAttachBufferCounterOut(udpsink,&outbc) ;
+		D.usink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"usink")) ;
+		dcvConfigAppSink(D.usink,dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, D.ftc->eosOut) ; 
+		dcvAttachBufferCounterOut(GST_ELEMENT_CAST(D.usink),&outbc) ;
 	}
 	{
 		{
@@ -202,17 +218,14 @@ int main( int argc, char** argv )
 			g_signal_connect(rtpdmx, "pad-removed", G_CALLBACK(paddEventRemoved), &D) ;
 		}
 		{
-			GstElement * usrc = gst_bin_get_by_name ( GST_BIN(D.pipeline), "usrc") ;
-			g_assert(usrc) ;
+			D.usrc = GST_APP_SRC_CAST(gst_bin_get_by_name ( GST_BIN(D.pipeline), "usrc")) ;
+			g_assert(D.usrc) ;
 			GstCaps *srccaps = gst_caps_new_simple (
 				"application/x-rtp", 
 				"clock-rate", G_TYPE_INT,90000, 
 				NULL ) ;
-//			g_object_set(G_OBJECT(usrc),"port", 50018, NULL) ; 
-//			g_object_set(G_OBJECT(usrc),"address", "192.168.1.71", NULL) ; 
-			g_object_set(G_OBJECT(usrc),"caps", srccaps, NULL) ; 
-			g_object_set(G_OBJECT(usrc),"buffer-size", 100000, NULL) ; 
-			dcvAttachBufferCounterIn(usrc,&inbc) ;
+			dcvConfigAppSrc(D.usrc,dcvAppSrcFrameWrite,D.ftc, dcvAppSrcFrameStop,D.ftc, eosRcvdSrc,&D.ftc->eosIn) ;
+			dcvAttachBufferCounterIn(GST_ELEMENT_CAST(D.usrc),&inbc) ;
 		}
 #if 1
 		{
@@ -249,11 +262,9 @@ int main( int argc, char** argv )
 			(double)dp/1000000.0, 
 			(double)op/1000000.0) ; 
 	}
-	if (dumpPipe == TRUE) {
-		g_print("Dumping pipeline\n") ;
-		return (4) ;
-	}
 
+	gst_element_set_state(GST_ELEMENT_CAST(D.usrc),GST_STATE_PLAYING) ;
+	gst_element_set_state(GST_ELEMENT_CAST(D.usink),GST_STATE_PLAYING) ;
 	gst_element_set_state(GST_ELEMENT_CAST(D.dsrc),GST_STATE_PLAYING) ;
 	gst_element_set_state(GST_ELEMENT_CAST(D.vsink),GST_STATE_PLAYING) ;
 	gst_element_set_state(GST_ELEMENT_CAST(D.dsink),GST_STATE_PLAYING) ;
@@ -383,35 +394,6 @@ static void processbuffer(void *A, int isz, void *oB, int obsz, void *B, int bsz
 	}
 }
 
-static gboolean pts_buffer_match(GstBuffer *v1, GstBuffer *v2, GstClockTime *p1, GstClockTime *p2)
-{
-	gboolean retval;
-	*p1 = GST_BUFFER_PTS(v1) ;
-	*p2 = GST_BUFFER_PTS(v2) ;
-	if (!GST_BUFFER_PTS_IS_VALID(v1) || !GST_BUFFER_PTS_IS_VALID(v2)) {
-		g_print("Pts Buffer Match: one of the buffers has no pts %s %s: ",
-				GST_BUFFER_PTS_IS_VALID(v1) ? "valid":"invalid",
-			       	GST_BUFFER_PTS_IS_VALID(v2) ? "valid":"invalid") ;
-
-		retval = FALSE ;
-	}
-	else
-	{
-		g_print("PtsBuffer Match : pts1 = %.5g ms pts2 = %.5g ms: ",(double)(*p1)/1000000.0, (double)*p2/1000000.0) ;
-		if (abs((long)(*p1 - *p2)) < 5*1000000) {
-			if (*p1 > *p2) 
-				GST_BUFFER_PTS(v2) = *p1 ;
-			else if (*p2 < *p1) 
-				GST_BUFFER_PTS(v1) = *p2 ;
-			retval = TRUE ;
-		}
-		else
-			retval = FALSE ;
-	}
-	g_print("returning %s\n", retval == TRUE? "true":"false") ;
-	return retval;
-}
-				
 /** demux pad handlers **/
 static void paddEventAdded(GstElement *g, GstPad *p, gpointer d)
 {

@@ -1,7 +1,7 @@
-CC = gcc -O2
-CPP = g++ -O2
-LD = gcc -O2
-LDCPP = g++ -O2
+CC = gcc -g
+CPP = g++ -g
+LD = gcc -g
+LDCPP = g++ -g
 SRCHOME=/home/ggne0015/src/
 OPENCV_DIR=$(SRCHOME)/opencv-4.1.1
 GSTREAMER_DIR=$(SRCHOME)/gstreamer/
@@ -19,11 +19,11 @@ DEPFILES = rseq.hpp gutils.hpp
 
 all: gdyn grcvr gsproc
 
-gsproc: dsbase.o gutils.o $(DEPFILES)
-	$(LDCPP) -o $@ gutils.o dsbase.o $(LDFLAGS) -lopencv_world -lm
+gsproc: dsbase.o gutils.o gsftc.o $(DEPFILES)
+	$(LDCPP) -o $@ gutils.o gsftc.o dsbase.o $(LDFLAGS) -lopencv_world -lm
 
-gdyn: gdyn.o gutils.o $(DEPFILES)
-	$(LDCPP) -o $@ gdyn.o gutils.o $(LDFLAGS) -lm
+gdyn: gdyn.o gsftc.o gutils.o $(DEPFILES)
+	$(LDCPP) -o $@ gdyn.o gsftc.o gutils.o $(LDFLAGS) -lm
 
 grcvr : grcvr.o gutils.o $(DEPFILES)
 	$(LDCPP) -o $@ grcvr.o gutils.o $(LDFLAGS) -lm

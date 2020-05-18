@@ -266,8 +266,10 @@ void testStats(GstElement *tst)
 void eosRcvd(GstAppSink *slf, gpointer D)
 {
 	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	if (D) {
 	gboolean *eos = (gboolean *)D ;
 	*eos = TRUE ;
+	}
 }
 
 void eosRcvdSrc(GstAppSrc *slf, gpointer D)
@@ -314,7 +316,6 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 	GstSample *gsm ;
 	if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
 		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
-		g_assert(glb == NULL) ;
 		GstBuffer *gb = gst_sample_get_buffer(gsm);
 		dcv_BufContainer_t *bcnt = malloc(sizeof(dcv_BufContainer_t)) ;
 		bcnt->nb = gst_buffer_copy_deep(gb) ;
@@ -409,8 +410,8 @@ gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_d
 gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_samp, sink_preroll_fn_t sink_pre, void *d_pre, sink_eos_fn_t eosRcvd, void *d_eos)  
 {
 	if (vsink == NULL) return FALSE ;
-	g_signal_connect(GST_APP_SINK_CAST(vsink),"new-sample", sink_newsample,d_samp) ;
-	g_signal_connect(GST_APP_SINK_CAST(vsink),"new-preroll", sink_newpreroll,d_pre) ;
+	g_signal_connect(GST_APP_SINK_CAST(vsink),"new-sample", sink_ns,d_samp) ;
+	g_signal_connect(GST_APP_SINK_CAST(vsink),"new-preroll", sink_pre,d_pre) ;
 	g_signal_connect(GST_APP_SINK_CAST(vsink),"eos", eosRcvd,d_eos) ;
 	g_object_set(G_OBJECT(vsink), "emit-signals", TRUE,NULL) ;
 	g_object_set(G_OBJECT(vsink), "drop", FALSE, NULL) ;

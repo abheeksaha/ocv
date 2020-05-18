@@ -7,6 +7,7 @@
 #include <gst/app/app.h>
 #include <plugins/elements/gsttee.h>
 
+#include "gsftc.hpp"
 #include "gutils.hpp"
 static void help()
 {
@@ -31,6 +32,7 @@ typedef struct {
 	gboolean eosDsrc ;
 	unsigned long vsinkq;
 	dcv_bufq_t dq;
+	dcv_ftc_t *ftc;
 } dpipe_t ;
 
 #include <getopt.h>
@@ -45,14 +47,14 @@ extern bufferCounter_t inbc,outbc;
 volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
 static char fdesc[] = "filesrc location=v1.webm ! queue ! matroskademux name=mdmx ! queue name=vsrc ! tee name=tpoint \
-			  rtpmux name=mux ! queue ! udpsink name=usink \
+			  rtpmux name=mux ! queue ! appsink name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
 				  tpoint2.src_0 ! queue ! fakesink \
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
 			  appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
-			  rtpmux name=mux ! queue ! udpsink name=usink \
+			  rtpmux name=mux ! queue ! appsink  name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
 				  tpoint2.src_0 ! queue ! fakesink \
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
@@ -116,17 +118,16 @@ int main( int argc, char** argv )
 	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
 
 	{
-		gchar clientstring[1024] ;
-		sprintf(clientstring,"192.168.1.71:%u",txport) ;
-		g_print("Setting destination to %s\n",clientstring) ;
-		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-#if 1
-		g_object_set(G_OBJECT(udpsink),"host", "192.168.1.71", NULL) ; 
-		g_object_set(G_OBJECT(udpsink),"port", txport , NULL) ; 
-#else
-		g_object_set(G_OBJECT(udpsink),"clients", clientstring , NULL) ; 
-#endif
-		g_object_set(G_OBJECT(udpsink),"qos", TRUE , NULL) ; 
+		char clientstring[1024];
+		sprintf(clientstring,"192.168.1.71") ;
+		g_print("Setting destination to %s:%u\n",clientstring,txport) ;
+		GstElement *finalsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
+		D.ftc = dcvFtConnInit(NULL,-1,clientstring,txport) ;
+		if (D.ftc == NULL) {
+			g_print("Something went wrong in initialization\n") ;
+			exit(3) ;
+		}
+		dcvConfigAppSink(GST_APP_SINK_CAST(finalsink),dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, D.ftc->eosOut) ; 
 	}
 	{
 		g_object_set(G_OBJECT(D.tpt), "pull-mode", GST_TEE_PULL_MODE_SINGLE, NULL) ;
@@ -197,7 +198,8 @@ int main( int argc, char** argv )
 	else {
 		g_print ("mqsrc should have been linked!!!\n") ;
 	}
-	/** Now we will walk the pipeline and dump the caps **/
+	dcvFtConnStart(D.ftc) ;
+
 	ret = gst_element_set_state (D.pipeline, GST_STATE_PLAYING);
 	if (ret == GST_STATE_CHANGE_FAILURE) {
 		g_printerr ("Unable to set the pipeline to the playing state.\n");
@@ -287,24 +289,8 @@ int main( int argc, char** argv )
 			}
 			gst_event_unref(gevent) ;
 		}
-		if (sigrcvd) {
-			guint64 bs=0,bts=0;
-			GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-			g_object_get(udpsink, "bytes-served", &bs, NULL) ;
-			g_object_get(udpsink, "bytes-to-serve", &bts, NULL) ;
-			g_print("UDP Sink stats: Bytes Served: %lu, to serve=%lu\n", bs,bts) ;
-			sigrcvd = FALSE ;
-		}
 
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
-	{
-		guint64 bs=0,bts=0;
-		GstElement *udpsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-		g_object_get(udpsink, "bytes-served", &bs, NULL) ;
-		g_object_get(udpsink, "bytes-to-serve", &bts, NULL) ;
-		g_print("UDP Sink stats: Bytes Served: %lu, to serve=%lu\n", bs,bts) ;
-	}
-	bufferCounterDump(2) ;
 }
 
 
