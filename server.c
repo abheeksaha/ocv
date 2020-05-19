@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
      socklen_t clilen;
      char buffer[8192];
      struct sockaddr_in serv_addr, cli_addr;
-     int n;
+     int n,tb=0;
      if (argc < 2) {
          fprintf(stderr,"ERROR, no port provided\n");
          exit(1);
@@ -65,8 +65,9 @@ int main(int argc, char *argv[])
 	     n = read(newsockfd,buffer,8192);
 	     if (n < 0) { printf("ERROR reading from socket"); break ; }
 	     else if (n == 0) { printf("Connection closed\n") ; break ; }
+	     tb += n ;
 	     write(outf,buffer,n);
-	     printf("(%d bytes) ",n) ;
+	     printf("(%d bytes) ",tb) ;
      }
      printf("\n") ;
    close(newsockfd);

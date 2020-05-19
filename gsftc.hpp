@@ -4,6 +4,10 @@
 gboolean dcvSendBuffer (GstBuffer *b, gpointer d) ;
 
 #define SIZEOFFRAMEHDR (4*sizeof(unsigned int)) 
+#define SZOFFSET 3
+#define TMOFFSET 2
+#define UWOFFSET 0
+#define SEQOFFSET 1
 #define MAXBYTESINARRAY  32768
 
 typedef struct {
@@ -27,6 +31,7 @@ typedef struct {
 
 gboolean dcvFtConnStart(dcv_ftc_t *D) ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport) ;
+int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, int length) ;
 
 #define uw 0xf3487655
 

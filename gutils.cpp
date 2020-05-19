@@ -40,11 +40,13 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
           break;
         case GST_MESSAGE_STATE_CHANGED:
           /* We are only interested in state-changed messages from the pipeline */
-          if (GST_MESSAGE_SRC (msg) == GST_OBJECT (pipeline)) {
+	  GstElement *msgsrc = GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)) ;
+          //if (GST_MESSAGE_SRC (msg) == GST_OBJECT (pipeline)) 
+	  {
             GstState pending_state;
             gst_message_parse_state_changed (msg, ostate, nstate, &pending_state);
-            g_print ("Pipeline %s state changed from %s to %s:\n",
-			    GST_ELEMENT_NAME(pipeline),
+            g_print ("Element %s state changed from %s to %s:\n",
+			    GST_ELEMENT_NAME(msgsrc),
                 gst_element_state_get_name (*ostate), gst_element_state_get_name (*nstate));
           }
           break;
@@ -333,18 +335,19 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 
 void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
 {
-	srcstate_e *pD = (srcstate_e *)data ;
-	if (*pD != G_WAITING) {
-		g_print("%s Needs data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-		*pD = G_WAITING;
+	srcstate_t *pD = (srcstate_t *)data ;
+	if (pD->state != G_WAITING) {
+		g_print("%s Needs %d bytes of data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s)), length) ;
+		pD->state = G_WAITING;
 	}
+	pD->length=length;
 }
 void dataFrameStop(GstAppSrc *s, gpointer data)
 {
-	srcstate_e *pD = (srcstate_e *)data ;
-	if (*pD != G_BLOCKED) {
+	srcstate_t *pD = (srcstate_t *)data ;
+	if (pD->state != G_BLOCKED) {
 	g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	*pD = G_BLOCKED;
+	pD->state = G_BLOCKED;
 	}
 }
 

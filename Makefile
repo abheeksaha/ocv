@@ -19,6 +19,8 @@ DEPFILES = rseq.hpp gutils.hpp
 
 all: gdyn grcvr gsproc
 
+test: client server
+
 gsproc: dsbase.o gutils.o gsftc.o $(DEPFILES)
 	$(LDCPP) -o $@ gutils.o gsftc.o dsbase.o $(LDFLAGS) -lopencv_world -lm
 

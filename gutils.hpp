@@ -22,6 +22,11 @@ typedef enum {
 	G_BLOCKED
 } srcstate_e ;
 
+typedef struct {
+	srcstate_e state ;
+	int length ;
+}srcstate_t ;
+
 typedef unsigned int u32 ;
 
 typedef void (*src_dfw_fn_t)(GstAppSrc *, guint, gpointer) ;

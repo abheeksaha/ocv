@@ -27,7 +27,7 @@ typedef struct {
 	GstElement *mux;
 	GstElement *op;
 	GstElement *vp9d;
-	srcstate_e dsrcstate;
+	srcstate_t dsrcstate;
 	gboolean eos;
 	gboolean eosDsrc ;
 	unsigned long vsinkq;
@@ -114,7 +114,8 @@ int main( int argc, char** argv )
 	D.eosDsrc = FALSE ;
 	D.vsinkq=0 ;
 	D.dq.bufq = g_queue_new() ;
-	D.dsrcstate = G_BLOCKED;
+	D.dsrcstate.state = G_BLOCKED;
+	D.dsrcstate.length = 0;
 	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
 
 	{
@@ -247,7 +248,7 @@ int main( int argc, char** argv )
 
 		ctr++ ;
 		if (newstate == GST_STATE_PLAYING) {
-			while (D.dsrcstate == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
+			while (D.dsrcstate.state == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
 				dcv_BufContainer_t *dv ;
 				ctr = 0 ;
 				dv = (dcv_BufContainer_t *)g_queue_pop_head(D.dq.bufq) ;
@@ -287,7 +288,7 @@ int main( int argc, char** argv )
 			if (gst_pad_push_event(spad,gevent) != TRUE) {
 				g_print("Sorry, couldn't push eos event, even though I am done\n") ;
 			}
-			gst_event_unref(gevent) ;
+			else gst_event_unref(gevent) ;
 		}
 
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
