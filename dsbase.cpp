@@ -249,17 +249,6 @@ int main( int argc, char** argv )
 		g_print ("Unable to set data src to the playing state.\n");
 		return -1;
 	}
-#if 0
-	else {
-		GstEvent * ge = gst_event_new_stream_start("dcv-usrc") ;
-		GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.usrc),"src") ;
-		g_assert(spad) ;
-		if (gst_pad_push_event(spad,ge) != TRUE) {
-			g_print("Sorry, couldn't push stream start event\n") ;
-		}
-		else gst_event_unref(ge) ;
-	}
-#endif
 	GstClockTime dp,op;
 
 	ret = gst_element_set_state (D.pipeline, GST_STATE_PLAYING);
@@ -282,17 +271,6 @@ int main( int argc, char** argv )
 	{
 		g_print("Couldn't set dsrc state to playing\n") ;
 	}
-#if 0
-	else {
-		GstEvent * ge = gst_event_new_stream_start("dcv-dsrc") ;
-		GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.dsrc),"src") ;
-		g_assert(spad) ;
-		if (gst_pad_push_event(spad,ge) != TRUE) {
-			g_print("Sorry, couldn't push stream start event\n") ;
-		}
-		else gst_event_unref(ge) ;
-	}
-#endif
 #if 1
 	if ( ( ret = gst_element_set_state(GST_ELEMENT_CAST(D.usink),GST_STATE_PLAYING)) == GST_STATE_CHANGE_FAILURE)
 	{

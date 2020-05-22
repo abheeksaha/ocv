@@ -74,10 +74,9 @@ gboolean dcvFtConnStart(dcv_ftc_t *D)
 			g_print("ERROR connecting:%s\n",strerror(errno));
 			return FALSE ;
 		}
-	}
 	else {
 		g_print("Connected to server:%s:%u\n",inet_ntoa(D->dstaddr.sin_addr),D->dstaddr.sin_port) ;
-		return TRUE ;
+		}
 	}
 	if (D->servsock != -1) {
 		g_print("Opening server connection\n") ;
@@ -204,7 +203,8 @@ int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 			else if (pushedbytes == -1) {
 			/** More data required **/
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
-				break ;
+				if (*pfinished == TRUE) return tbytes ;
+				else break ;
 			}
 			else
 			{
