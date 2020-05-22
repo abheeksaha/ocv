@@ -9,11 +9,9 @@
 
 #include "gsftc.hpp"
 #include "gutils.hpp"
-static void help()
+static void help(char *name)
 {
-	g_print("Usage: gdyn -p <port num for tx: default 50018> \
- -t <do not transmit the data buf> \
- -n <Take input from net, not from file\n" ) ;
+	g_print("Usage: %s -f <input file, webm format> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -30,6 +28,7 @@ typedef struct {
 	srcstate_t dsrcstate;
 	gboolean eos;
 	gboolean eosDsrc ;
+	GstElement *fsrc ;
 	unsigned long vsinkq;
 	dcv_bufq_t dq;
 	dcv_ftc_t *ftc;
@@ -46,7 +45,7 @@ void bufDump(int signalnum) ;
 extern bufferCounter_t inbc,outbc;
 volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
-static char fdesc[] = "filesrc location=v1.webm ! queue ! matroskademux name=mdmx ! queue name=vsrc ! tee name=tpoint \
+static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
 				  tpoint2.src_0 ! queue ! fakesink \
@@ -72,23 +71,26 @@ int main( int argc, char** argv )
 	char *pipedesc = fdesc;
 	guint txport = 50018;
 	gboolean dotx = TRUE ;
+	char clientipaddr[1024];
+	char videofile[1024] ; 
+	strcpy(videofile,"v1.webm") ;
+	strcpy(clientipaddr,"192.168.1.71") ;
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	bufferCounterInit(&inbc,&outbc) ;
 
-	while ((ch = getopt(argc, argv, "p:tnh")) != -1) {
+	while ((ch = getopt(argc, argv, "p:i:f:h")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
 		}
-		if (ch == 't') 
-		{
-			dotx = FALSE ;
-		}
-		if (ch == 'h') { help(); exit(3) ; }
-		if (ch == 'n') { g_print("Switching to network mode\n") ; pipedesc = ndesc ; }
+		if (ch == 'h') { help(argv[0]); exit(3) ; }
+		if (ch == 'i') { strcpy(clientipaddr,optarg) ; break ; }
+		if (ch == 'f') { strcpy(videofile, optarg) ; break ; }
 	}
 	gst_init(&argc, &argv) ;
+	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
+
 	g_print("Using txport = %u\n",txport) ;
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc, *srcpad ;
@@ -118,12 +120,15 @@ int main( int argc, char** argv )
 	D.dsrcstate.length = 0;
 	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
 
+	D.fsrc = gst_bin_get_by_name(GST_BIN(D.pipeline),"fsrc") ;
+	g_assert(D.fsrc) ;
+	g_object_set(G_OBJECT(D.fsrc), "location", videofile, NULL) ;
+	dcvAttachBufferCounterIn(D.fsrc,&inbc) ;
+
 	{
-		char clientstring[1024];
-		sprintf(clientstring,"192.168.1.71") ;
-		g_print("Setting destination to %s:%u\n",clientstring,txport) ;
+		g_print("Setting destination to %s:%u\n",clientipaddr,txport) ;
 		GstElement *finalsink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-		D.ftc = dcvFtConnInit(NULL,-1,clientstring,txport) ;
+		D.ftc = dcvFtConnInit(NULL,-1,clientipaddr,txport) ;
 		if (D.ftc == NULL) {
 			g_print("Something went wrong in initialization\n") ;
 			exit(3) ;
@@ -144,6 +149,7 @@ int main( int argc, char** argv )
 			g_print("rtpsink2 likes caps: %s\n", gst_caps_to_string(u)) ;
 //			gst_pad_set_caps(rtpsink2,gst_caps_new_simple ("application/x-rtp", NULL)) ;
 		}
+#if 0
 		{
 			GstElement *ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ; g_assert(ge) ;
 			GstElement *ige;
@@ -156,6 +162,7 @@ int main( int argc, char** argv )
 			}
 			dcvAttachBufferCounterIn(ige,&inbc) ;
 		}
+#endif
 #if VP9PAY
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"vppy") ; g_assert(ge) ;
@@ -199,7 +206,10 @@ int main( int argc, char** argv )
 	else {
 		g_print ("mqsrc should have been linked!!!\n") ;
 	}
-	dcvFtConnStart(D.ftc) ;
+	if (dcvFtConnStart(D.ftc) == FALSE) {
+		g_print("Something happened during connection start\n") ;
+		exit(3) ;
+	}
 
 	ret = gst_element_set_state (D.pipeline, GST_STATE_PLAYING);
 	if (ret == GST_STATE_CHANGE_FAILURE) {
@@ -299,8 +309,12 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 {
 	GstPad *sinkpad;
 	GstElement *dec = (GstElement *)D;
+	GstCaps *t, *u ;
 	g_print("Received pad added signal\n") ;
 	sinkpad = gst_element_get_static_pad(dec ,"sink") ;
+	t = gst_pad_query_caps(p,NULL) ;
+	u = gst_pad_query_caps(sinkpad,NULL) ;
+	g_print("Matching caps:%s to caps %s\n",gst_caps_to_string(t), gst_caps_to_string(u)) ;
 	GstPadLinkReturn ret = gst_pad_link(p, sinkpad) ;
 	if (GST_PAD_LINK_FAILED(ret)) {
 		g_printerr("Couldn't link data to mux: ret=%d\n", ret) ;

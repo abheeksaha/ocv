@@ -8,8 +8,12 @@
 #include "gutils.hpp"
 #include "rseq.hpp"
 
+
 bufferCounter_t inbc,outbc;
 extern gboolean terminate ;
+
+
+
 gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, unsigned int tms)
 {
 	GstBus *bus;

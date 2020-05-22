@@ -9,7 +9,10 @@ b. gsproc is the intermediate stage; it takes in two streams (video and data) an
 
 c. grcvr is the final stage, which displays the video. It listens to port 50019
 
-To connect gdyn directly to grcvr, use gdyn -p 50019. Otherwise, it will go through gsproc. There is a buffering/corruption
-error that I am still working on.
+As of today, these work on TCP and not UDP. Each stage acts as the server for the stage before it and 
+as the client for the stage afterwards. Hence, to start up, you have to run grcvr first,
+then gsproc and finally gdyn. grcvr uses port 50019 by default (it can be changed using -r <recv port>.
+gsproc uses 50018 by default; this can be changed using gsproc -r <recv port> -s <send port> -i <send ip>.
+Finally, gdyn uses -p <send port> -i <send ip> to set the destination address.
 
 -Abheek

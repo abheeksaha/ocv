@@ -4,6 +4,9 @@
 #include <sys/time.h>
 #define validstate(k) ((k>=0) && (k<=4))
 
+GST_DEBUG_CATEGORY_STATIC (my_category);
+#define GST_CAT_DEFAULT my_category
+
 typedef struct {
 	GQueue *bufq;
 	struct timeval lastData;

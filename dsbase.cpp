@@ -10,8 +10,9 @@
 #include "rseq.hpp"
 
 #define MAX_STAY 1
-static void help()
+static void help(char *name)
 {
+	g_print("Usage: %s -p <port num for tx: default 50018> -r <port number to listen on> -i <dest ip address for transmisison>\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *oB, int obsz, void *B, int bsz) ;
@@ -82,9 +83,10 @@ int main( int argc, char** argv )
 	guint ctr=0;
 	struct timeval lastCheck;
 	struct timezone tz;
+	char clientipaddr[1024];
+	sprintf(clientipaddr, "192.168.1.71") ;
 
-	help();
-	while ((ch = getopt(argc, argv, "Np:dr:")) != -1) {
+	while ((ch = getopt(argc, argv, "p:r:i:h")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport:%d\n",txport) ; 
@@ -93,11 +95,14 @@ int main( int argc, char** argv )
 		{
 			rxport = atoi(optarg) ; g_print("Setting rxport:%d\n",rxport) ; 
 		}
-		if (ch == 'N') {
-			tx = FALSE ;
+		if (ch == 'i') 
+		{
+			strcpy(clientipaddr,optarg) ;
 		}
+		if (ch == 'h') { help(argv[0]); exit(3) ; }
 	}
 	gst_init(&argc, &argv) ;
+	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
 	g_print("Using txport = %u\n",txport) ;
 	//bufferCounterInit(&inbc,&outbc) ;
 	
@@ -126,10 +131,8 @@ int main( int argc, char** argv )
 	D.dsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsink")) ;
 	/** Configure the end-points **/
 	{
-		char clientstring[1024];
-		sprintf(clientstring,"192.168.1.71") ;
-		g_print("Setting destination to %s:%u\n",clientstring,txport) ;
-		D.ftc = dcvFtConnInit(clientstring,rxport,clientstring,txport) ;
+		g_print("Setting destination to %s:%u\n",clientipaddr,txport) ;
+		D.ftc = dcvFtConnInit("",rxport,clientipaddr,txport) ;
 		if (D.ftc == NULL) {
 			g_print("Something went wrong in initialization\n") ;
 			exit(3) ;

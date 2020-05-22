@@ -52,6 +52,10 @@
 
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/core/utils/filesystem.hpp>
+#include <opencv2/video/tracking.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/highgui.hpp>
 
 #include <iostream>
 #include <string.h>
@@ -82,7 +86,7 @@ namespace cv {
 static void toFraction(double decimal, CV_OUT int& numerator, CV_OUT int& denominator);
 static void handleMessage(GstElement * pipeline);
 gboolean writeFrame( const IplImage * image, unsigned int num_frames, double framerate, GstBuffer **buffer ) ;
-static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteBuffer, GstSample *sample) ;
+static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteBuffer, GstCaps *caps) ;
 
 
 
@@ -93,21 +97,18 @@ static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteB
  * \return IplImage pointer. [Transfer Full]
  *  Retrieve the previously grabbed buffer, and wrap it in an IPLImage structure
  */
-bool retrieveFrame(GstSample * sample, OutputArray dst)
+bool retrieveFrame(GstBuffer * buf, GstCaps * caps, OutputArray dst)
 {
-    if (!sample)
+    if (!buf)
         return false;
     Size sz;
     gint channels = 0;
     bool isOutputByteBuffer = false;
-    if (!determineFrameDims(sz, channels, isOutputByteBuffer, sample))
+    if (!determineFrameDims(sz, channels, isOutputByteBuffer, caps))
         return false;
 
     // gstreamer expects us to handle the memory at this point
     // so we can just wrap the raw buffer and be done with it
-    GstBuffer* buf = gst_sample_get_buffer(sample);  // no lifetime transfer
-    if (!buf)
-        return false;
     GstMapInfo info = {};
     if (!gst_buffer_map(buf, &info, GST_MAP_READ))
     {
@@ -136,9 +137,8 @@ bool retrieveFrame(GstSample * sample, OutputArray dst)
     return true;
 }
 
-static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteBuffer, GstSample *sample)
+static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteBuffer, GstCaps *frame_caps)
 {
-    GstCaps * frame_caps = gst_sample_get_caps(sample);  // no lifetime transfer
     guint32 width,height;
 
     // bail out in no caps
@@ -311,9 +311,36 @@ void toFraction(const double decimal, int &numerator_i, int &denominator_i)
     //printf("%g: %d/%d    (err=%g)\n", decimal, numerator_i, denominator_i, err);
 }
 
-}
-gboolean  retrieveFrame(unsigned long *a, unsigned long *b)
+} //End of cv namespace
+
+using namespace cv;
+using namespace std;
+gboolean frameToImg(GstBuffer *buf, GstCaps *caps)
 {
-	cv::Mat img;
-	return cv::retrieveFrame(NULL,img) ;
+	Mat img;
+	return retrieveFrame(buf,caps,img) ;
+}
+
+TermCriteria termcrit(TermCriteria::COUNT|TermCriteria::EPS,20,0.03);
+void stage1(cv::Mat img)
+{
+	Mat gray;
+    	vector<Point2f> points[2];
+    	Size subPixWinSize(10,10), winSize(31,31);
+	const int MAX_COUNT = 500 ;
+
+        cvtColor(img, gray, COLOR_BGR2GRAY);
+	goodFeaturesToTrack(gray, points[1], MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
+	cornerSubPix(gray, points[1], subPixWinSize, Size(-1,-1), termcrit);
+}
+
+void stage2(cv::Mat img, vector<Point2f> points)
+{
+	vector<uchar> status;
+	vector<float> err;
+	Size winSize(31,31)  ;
+	if(prevImg.empty())
+		img.copyTo(prevImg);
+
+	calcOpticalFlowPyrLK(prevImg, img, points[0], points[1], status, err, winSize, 3, termcrit, 0, 0.001);
 }
