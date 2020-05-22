@@ -27,11 +27,13 @@ typedef struct {
 	int seqExpected;
 	gboolean eosOut;
 	gboolean eosIn;
+	GstClock *pclk ;
 }dcv_ftc_t ;
 
 gboolean dcvFtConnStart(dcv_ftc_t *D) ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport) ;
-int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, int length) ;
+int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D) ;
+int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished) ;
 
 #define uw 0xf3487655
 

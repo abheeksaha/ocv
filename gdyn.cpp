@@ -52,7 +52,7 @@ static char fdesc[] = "filesrc location=v1.webm ! queue ! matroskademux name=mdm
 				  tpoint2.src_0 ! queue ! fakesink \
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
-			  appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+			  appsrc name=dsrc ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
@@ -172,9 +172,9 @@ int main( int argc, char** argv )
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"dsrc") ; g_assert(ge) ;
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
-//		  	GstCaps *caps = gst_caps_new_simple ("application/x-raw", NULL);
-//			gst_app_src_set_caps(D.dsrc,caps) ;
-			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eosDsrc) ;
+		  	GstCaps *caps = gst_caps_new_simple ("application/x-rtp",
+		  		"media",G_TYPE_STRING,"application","clock-rate",G_TYPE_INT,90000,"payload",G_TYPE_INT,102,"encoding-name",G_TYPE_STRING,"X-GST",NULL) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eosDsrc,caps) ;
 		}
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 

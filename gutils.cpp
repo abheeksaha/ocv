@@ -41,7 +41,7 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
         case GST_MESSAGE_STATE_CHANGED:
           /* We are only interested in state-changed messages from the pipeline */
 	  GstElement *msgsrc = GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)) ;
-          //if (GST_MESSAGE_SRC (msg) == GST_OBJECT (pipeline)) 
+          if (GST_MESSAGE_SRC (msg) == GST_OBJECT (pipeline)) 
 	  {
             GstState pending_state;
             gst_message_parse_state_changed (msg, ostate, nstate, &pending_state);
@@ -394,7 +394,7 @@ void dcvAttachBufferCounterIn(GstElement *e, bufferCounter_t *bc)
 }
 
 /** Configuration Functions **/
-gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs, src_eos_fn_t eosRcvd, void *d_eos )
+gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs, src_eos_fn_t eosRcvd, void *d_eos,GstCaps *caps )
 {
 	if (dsrc == NULL) return FALSE ;
 	g_object_set(G_OBJECT(dsrc), "format", GST_FORMAT_TIME,NULL) ;
@@ -407,6 +407,8 @@ gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_d
 	g_signal_connect(G_OBJECT(dsrc), "need-data", G_CALLBACK(src_dfw), dfw) ;
 	g_signal_connect(G_OBJECT(dsrc), "enough-data", G_CALLBACK(src_dfs), dfs) ;
 	g_signal_connect(GST_APP_SRC_CAST(dsrc),"end-of-stream", eosRcvd,d_eos) ;
+	if (caps != NULL)
+		gst_app_src_set_caps(dsrc,caps) ;
 	return TRUE ;
 }
 

@@ -104,83 +104,116 @@ gboolean dcvFtConnStart(dcv_ftc_t *D)
 #define max(a,b) ((a) > (b) ? (a):(b))
 #define min(a,b) ((a) < (b) ? (a):(b))
 
-int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, int maxbytes)
-{
-	int nbytes ;
-	gboolean forceflush=TRUE ;
-	while ( maxbytes > 0 && ((nbytes = recv(D->insock,D->pbuf,min(D->spaceleft,NETBUFSIZE),0)) >= 0)) {
-		/** See how much space there is in the array **/
-		if (nbytes == 0) {
-			//g_print("Connection closed!\n") ;
-			forceflush = TRUE ;
-		}
-		D->pbuf += nbytes;
-		D->spaceleft -= nbytes ;
-//		g_print("Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
-		if (D->spaceleft == D->totalbytes) {
-			gst_app_src_end_of_stream(slf) ;
-			return 0 ;
-		}
-		while (maxbytes > 0 && ((D->totalbytes - D->spaceleft) > 0) &&
-				(!(D->spaceleft < NETBUFSIZE)  ||
-				(D->totalbytes - D->spaceleft > NETBUFSIZE/2)  ||
-				(forceflush)) )
-		{
-		/** Clear out the buffer, make space **/
-			GstSample *gsm ; 
-			GstCaps *gcaps ;
-			unsigned int *pfh ; 
-			char *pfc ;
-			int bsize;
-			struct timeval tv ;
+int donothing() {
+	exit(1) ;
+}
 
-			pfh = (unsigned int *)D->obuf ;
-//			g_print("Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;
-			if ( (bsize = pfh[SZOFFSET])  > maxbytes) { g_print("Bsize=%d greater than maxbytes=%d\n",bsize,maxbytes) ; maxbytes = 0 ;break ; }
-			g_assert(pfh[UWOFFSET] == uw) ;
-			if (D->seqExpected != -1) { 
-				g_assert(pfh[SEQOFFSET] == D->seqExpected) ;
-				D->seqExpected++ ;
+int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
+{
+	/** Clear out the buffer, make space **/
+	GstSample *gsm ; 
+	GstCaps *gcaps ;
+	unsigned int *pfh ; 
+	char *pfc ;
+	int bsize;
+	struct timeval tv ;
+
+	pfh = (unsigned int *)D->obuf ;
+	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
+	if (maxbytes == 0) return maxbytes;
+	g_print("dcvPushBuffered:Bsize=%d Time=%d.%d sequence=%d maxbytes=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET], maxbytes) ;
+	if ( (bsize = pfh[SZOFFSET])  > maxbytes) { return 0; }
+	if ( bsize >  (D->totalbytes - D->spaceleft)) { return -1; }
+	if (pfh[UWOFFSET] != uw) donothing() ;
+	if (D->seqExpected != -1) { 
+		g_assert(pfh[SEQOFFSET] == D->seqExpected) ;
+		D->seqExpected++ ;
+	}
+	else 
+		D->seqExpected = pfh[SEQOFFSET]+1 ;
+	tv.tv_usec = pfh[TMOFFSET] & 0xffff ;
+	tv.tv_sec = pfh[TMOFFSET] >> 16 ;
+	if (bsize > D->totalbytes)
+	{
+		g_assert(bsize < D->totalbytes) ;
+	}
+	GstBuffer * gb = gst_buffer_new_allocate(NULL,bsize,NULL) ;
+	if (gb == NULL ) {
+		g_print("Ran out of buffers in the pool!\n") ; 
+		g_assert(gb) ;
+	}
+	GstMemory *bmem;
+	GstMapInfo bmap;
+	bmem = gst_buffer_get_all_memory(gb) ;
+	if (gst_memory_map(bmem, &bmap, GST_MAP_WRITE) != TRUE) { g_printerr("Couldn't map memory in send buffer for reading\n") ; }
+	pfc = (char *)&pfh[4] ;
+	memcpy(bmap.data,pfc,bsize) ;
+	if (D->pclk != NULL) GST_BUFFER_PTS(gb) = gst_clock_get_time(D->pclk) + 50*GST_MSECOND;
+#if 0
+	gcaps = gst_caps_new_simple("application/x-rtp",NULL) ;
+	gsm = gst_sample_new(gb,gcaps,NULL,NULL) ;
+	GstFlowReturn ret = gst_app_src_push_sample(slf,gsm) ;
+	gst_caps_unref(gcaps) ;
+	gst_sample_unref(gsm) ;
+#else
+	GstFlowReturn ret = gst_app_src_push_buffer(slf,gb) ;
+#endif
+	if (ret == GST_FLOW_ERROR) {
+		g_print("Couldn't push buffer to app src\n") ; 
+		g_assert(ret != GST_FLOW_ERROR) ;
+	}
+	maxbytes -= bsize;
+	D->spaceleft += SIZEOFFRAMEHDR+bsize;
+	if (D->totalbytes >= D->spaceleft)
+		memmove(D->obuf,&D->obuf[SIZEOFFRAMEHDR+bsize],D->totalbytes - D->spaceleft) ;
+	else
+		memset(D->obuf,0,D->totalbytes) ;
+	D->pbuf = &D->obuf[D->totalbytes - D->spaceleft] ;
+	g_print("dcvPushBuffered:Reclaimed %d bytes, spaceleft=%d\n",SIZEOFFRAMEHDR+bsize,D->spaceleft) ;
+	return (bsize) ;
+}
+int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
+{
+	int nbytes,tbytes=0 ;
+	gboolean forceflush=TRUE ;
+	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
+	g_print("dcvPushBytes: Starting with maxbytes=%u, space avail=%u\n",maxbytes,D->spaceleft) ;
+	while (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
+		while ( D->spaceleft > 0 && *pfinished == FALSE) {
+			nbytes = recv(D->insock,D->pbuf,D->spaceleft,0) ;
+		/** See how much space there is in the array **/
+			if (nbytes == 0) {
+				g_print("Connection closed!\n") ;
+				forceflush = TRUE ;
+				*pfinished = TRUE ;
 			}
-			else 
-				D->seqExpected = pfh[SEQOFFSET]+1 ;
-			tv.tv_usec = pfh[TMOFFSET] & 0xffff ;
-			tv.tv_sec = pfh[TMOFFSET] >> 16 ;
-			if (bsize > D->totalbytes)
-			{
-				g_assert(bsize < D->totalbytes) ;
+			else {
+				tbytes += nbytes ;
+				D->pbuf += nbytes;
+				D->spaceleft -= nbytes ;
+				g_print("dcvPushBytes: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
 			}
-			GstBuffer * gb = gst_buffer_new_allocate(NULL,bsize,NULL) ;
-			if (gb == NULL ) {
-				g_print("Ran out of buffers in the pool!\n") ; 
-				g_assert(gb) ;
+		}
+		while (maxbytes > 0)
+		{
+			int pushedbytes = dcvPushBuffered(slf,D) ;
+			g_print("dcvPushBytes: Pushed %d bytes\n",pushedbytes) ;
+			if (pushedbytes == 0) {
+				return tbytes ;
 			}
-			GstMemory *bmem;
-			GstMapInfo bmap;
-			bmem = gst_buffer_get_all_memory(gb) ;
-			if (gst_memory_map(bmem, &bmap, GST_MAP_WRITE) != TRUE) { g_printerr("Couldn't map memory in send buffer for reading\n") ; }
-			pfc = (char *)&pfh[4] ;
-			memcpy(bmap.data,pfc,bsize) ;
-			GST_BUFFER_PTS(gb);
-			gcaps = gst_caps_new_simple("application/x-rtp",NULL) ;
-			gsm = gst_sample_new(gb,gcaps,NULL,NULL) ;
-			GstFlowReturn ret = gst_app_src_push_sample(slf,gsm) ;
-			if (ret == GST_FLOW_ERROR) {
-				g_print("Couldn't push buffer to app src\n") ; 
-				g_assert(ret != GST_FLOW_ERROR) ;
+			else if (pushedbytes == -1) {
+			/** More data required **/
+				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
+				break ;
 			}
-			gst_sample_unref(gsm) ;
-			maxbytes -= bsize;
-			D->spaceleft += SIZEOFFRAMEHDR+bsize;
-			if (D->totalbytes > D->spaceleft)
-				memmove(D->obuf,&D->obuf[SIZEOFFRAMEHDR+bsize],D->totalbytes - D->spaceleft) ;
 			else
-				memset(D->obuf,0,D->totalbytes) ;
-			D->pbuf = &D->obuf[D->totalbytes - D->spaceleft] ;
-//			g_print("Reclaimed %d bytes, spaceleft=%d\n",SIZEOFFRAMEHDR+bsize,D->spaceleft) ;
+			{
+				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
+				tbytes += pushedbytes ;
+			}
 		}
 	}
-	return (D->totalbytes - D->spaceleft) ;
+	return tbytes ;
 }
 
 GstFlowReturn dcvAppSinkNewPreroll(GstAppSink *slf, gpointer d)
@@ -251,13 +284,13 @@ gboolean dcvSendBuffer (GstBuffer *b, gpointer d)
 	bmem = gst_buffer_get_all_memory(b) ;
 	if (gst_memory_map(bmem, &bmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in send buffer\n") ; }
 	gboolean rval = TRUE ;
-	*pfh++ = uw ; /** First 32 bits **/
-	*pfh++ = D->sequence++ ; /** Next 32 bits **/
+	pfh[UWOFFSET] = uw ; /** First 32 bits **/
+	pfh[SEQOFFSET] = D->sequence++ ; /** Next 32 bits **/
 	gettimeofday(&tv,&tz) ;
-	*pfh = tv.tv_usec & 0xffff ;
-	*pfh |= (tv.tv_sec & 0xffff) << 16 ;
-	pfh++ ;
-	*pfh = (unsigned int)bmap.size;
+	pfh[TMOFFSET] = tv.tv_usec & 0xffff ;
+	pfh[TMOFFSET] |= (tv.tv_sec & 0xffff) << 16 ;
+	pfh[SZOFFSET] = (unsigned int)bmap.size;
+	g_print("dcvSendBuffer:Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;
 //	g_print("Seq %u: sending %u bytes at %u.%u\n",D->sequence-1, *pfh, tv.tv_sec,tv.tv_usec) ;
 	if ( send(D->outsock,framehead,SIZEOFFRAMEHDR, MSG_MORE) == -1) {
 		return FALSE ;	
