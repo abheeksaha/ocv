@@ -11,7 +11,7 @@
 #include "gutils.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n",name) ;  
+	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -59,6 +59,7 @@ static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue 
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
 			  appsrc name=dsrc ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+
 int main( int argc, char** argv )
 {
 
@@ -69,7 +70,9 @@ int main( int argc, char** argv )
 	extern char *optarg;
 	static guint ctr=0;
 	char *pipedesc = fdesc;
+	gboolean inputfromnet=FALSE ;
 	guint txport = 50018;
+	guint rxport = 0;
 	gboolean dotx = TRUE ;
 	char clientipaddr[1024];
 	char videofile[1024] ; 
@@ -79,14 +82,15 @@ int main( int argc, char** argv )
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	bufferCounterInit(&inbc,&outbc) ;
 
-	while ((ch = getopt(argc, argv, "p:i:f:h")) != -1) {
+	while ((ch = getopt(argc, argv, "p:i:f:hn:")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
 		}
 		if (ch == 'h') { help(argv[0]); exit(3) ; }
-		if (ch == 'i') { strcpy(clientipaddr,optarg) ; break ; }
-		if (ch == 'f') { strcpy(videofile, optarg) ; break ; }
+		if (ch == 'i') { strcpy(clientipaddr,optarg) ;  }
+		if (ch == 'f') { strcpy(videofile, optarg) ;  }
+		if (ch == 'n') { inputfromnet=TRUE; pipedesc = ndesc ; rxport = atoi(optarg) ;  }
 	}
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
@@ -110,7 +114,7 @@ int main( int argc, char** argv )
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.tpt  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint") ;
 	D.vp9d  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vp9d") ;
-	if (pipedesc == fdesc) D.mdmx  = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
+	if (inputfromnet == FALSE) D.mdmx  = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
 	else D.mdmx = NULL ;
 	D.eos = FALSE ;
 	D.eosDsrc = FALSE ;
@@ -120,10 +124,18 @@ int main( int argc, char** argv )
 	D.dsrcstate.length = 0;
 	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
 
-	D.fsrc = gst_bin_get_by_name(GST_BIN(D.pipeline),"fsrc") ;
-	g_assert(D.fsrc) ;
-	g_object_set(G_OBJECT(D.fsrc), "location", videofile, NULL) ;
-	dcvAttachBufferCounterIn(D.fsrc,&inbc) ;
+	if (inputfromnet == FALSE) {
+		D.fsrc = gst_bin_get_by_name(GST_BIN(D.pipeline),"fsrc") ;
+		g_assert(D.fsrc) ;
+		g_object_set(G_OBJECT(D.fsrc), "location", videofile, NULL) ;
+		dcvAttachBufferCounterIn(D.fsrc,&inbc) ;
+	}
+	else {
+		D.fsrc = gst_bin_get_by_name(GST_BIN(D.pipeline),"usrc") ;
+		g_assert(D.fsrc) ;
+		g_object_set(G_OBJECT(D.fsrc),"port", rxport, NULL) ; 
+		dcvAttachBufferCounterIn(D.fsrc,&inbc) ;
+	}
 
 	{
 		g_print("Setting destination to %s:%u\n",clientipaddr,txport) ;

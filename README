@@ -1,18 +1,24 @@
-There are three programs here
 
-a. gdyn is stage 1 and what should run on the Mobile. It reads data from a file, does initial processing
-and then transmits both the video and the output code on RTP using payload types 96 and 102 respectively.
-By default it transmits on port 50018, use the -p option to change this
+There are now only 2 programs. One (gdyn) will run on the container in the edge and the second (grcrv)
+will run on the backend.
 
-b. gsproc is the intermediate stage; it takes in two streams (video and data) and outputs two streams 
-(video and data). It listens to port 50018
+a. gdyn is stage 1 and what should run on the edge container. Note that this is a change from the earlier mode. 
+gdyn has two modes of operation. If you call it with -f <filename> it reads data from a file, does initial 
+processing and then transmits both the video and the output code on RTP using payload types 96 and 102 respectively.
+By default it transmits on port 50018, use the -p option to change this. This mode is for testing. For field 
+running, you have to call it with gdyn -n <recv port>. It then waits for streamed rtp/udp packets from an
+external player that it will then process and forward.
+
+b. gsproc is no longer needed as of now. I may add it as an intermediate state if needed.
+
+c. udpclient.sh is a small script which will run on the mobile. It will simply take an input file and play
+it out to the destination address and port. Run udpclient.sh -h to see how to give it parameters
 
 c. grcvr is the final stage, which displays the video. It listens to port 50019
 
-As of today, these work on TCP and not UDP. Each stage acts as the server for the stage before it and 
-as the client for the stage afterwards. Hence, to start up, you have to run grcvr first,
-then gsproc and finally gdyn. grcvr uses port 50019 by default (it can be changed using -r <recv port>.
-gsproc uses 50018 by default; this can be changed using gsproc -r <recv port> -s <send port> -i <send ip>.
-Finally, gdyn uses -p <send port> -i <send ip> to set the destination address.
+gdyn and grcvr communicate using TCP, which saves us from packet dropping; there may be delays however. For
+both programs, use the -h option to see how to set the destination and transmit ports and (in the case of
+gdyn) the transmit IP address.
+
 
 -Abheek
