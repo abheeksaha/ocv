@@ -19,4 +19,4 @@ if [ $# -gt 2 ]; then
 fi 
 echo "Using destination=$destination port=$port file=$file";
 
-gst-launch-1.0 filesrc location=$file ! matroskademux ! vp9dec ! videoconvert ! videoscale ! videorate ! video/x-raw,framerate=10/1 ! vp9enc ! rtpvp9pay ! udpsink host=$destination port=$port
+gst-launch-1.0 filesrc location=$file ! matroskademux ! rtpvp9pay ! udpsink host=$destination port=$port

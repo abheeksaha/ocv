@@ -441,5 +441,5 @@ void bufferCounterDump(int signalnum)
 	extern gboolean sigrcvd;
 	g_print("Received %d: inbuffer=%u inbytes=%u outbuffer=%u outbytes=%u\n",signalnum,
 			inbc.buffercount,inbc.bytecount,outbc.buffercount,outbc.bytecount) ;
-	sigrcvd = TRUE ;
+	exit(4) ;
 }

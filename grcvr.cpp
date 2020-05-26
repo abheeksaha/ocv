@@ -8,6 +8,7 @@
 #include "gsftc.hpp"
 #include "gutils.hpp"
 #include "rseq.hpp"
+#include "dsopencv.hpp"
 
 #define MAX_STAY 1
 static void help(char *name)
@@ -15,7 +16,6 @@ static void help(char *name)
 	g_print("Usage: %s -r <port number to listen on> \n",name) ;  
 }
 
-static void processbuffer_stage3(void *A, int isz, void *oB, int obsz) ;
 GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
 typedef struct {
 	GstElement *pipeline;
@@ -50,9 +50,9 @@ gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static char srcdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! avdec_vp9 name=vdec ! videoconvert ! videoscale ! tee name=tpoint \
+rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! tee name=tpoint \
 tpoint.src_0 ! queue ! appsink name=vsink \
-tpoint.src_1 ! queue ! autovideosink \
+tpoint.src_1 ! queue ! fakesink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink ";
 
 
@@ -235,14 +235,14 @@ int main( int argc, char** argv )
 				int bpushed ;
 				if (D.usrcstate.finished != TRUE) {
 					bpushed = dcvPushBytes(D.usrc,D.ftc,&D.usrcstate.finished) ;
-					if (bpushed)g_print("Pushed %d bytes\n",bpushed ) ;
+					if (bpushed)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
 					if (D.usrcstate.finished == TRUE) {
 						g_print("End of stream achieved\n") ;
 					}
 				}
 				else { /** Connection closed from sender side, try and clear out the packets **/
 					bpushed = dcvPushBuffered(D.usrc,D.ftc) ;
-					if (bpushed)g_print("Pushed %d bytes\n",bpushed ) ;
+					if (bpushed)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
 					if (D.ftc->totalbytes == D.ftc->spaceleft) {
 						g_print("End of stream and no buffered bytes left\n") ;
 						gst_app_src_end_of_stream(D.usrc) ;
@@ -280,23 +280,21 @@ int main( int argc, char** argv )
 					continue ;
 				}
 				{
+					dcv_BufContainer_t *qe = ((dcv_BufContainer_t *)g_queue_pop_nth(D.videoframequeue.bufq,vfmatch)) ;
 					dataFrameWaiting = dataFrameContainer->nb;
-					videoFrameWaiting = ((dcv_BufContainer_t *)g_queue_pop_nth(D.videoframequeue.bufq,vfmatch))->nb ;
-					GstMemory *vmem,*odmem;
-					GstMapInfo vmap,odmap;
+					videoFrameWaiting = qe->nb ;
+					GstCaps *vcaps = qe->caps ;
+					GstMemory *odmem;
+					GstMapInfo odmap;
 					gboolean match=FALSE ;
-					vmem = gst_buffer_get_all_memory(videoFrameWaiting) ;
 					odmem = gst_buffer_get_all_memory(dataFrameWaiting) ;
-					if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
 					if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
 					{
-						g_print("Input:%d,%d..\n",vmap.size,odmap.size) ;
-						processbuffer_stage3(vmap.data,vmap.size,odmap.data,odmap.size) ;
-
+						processBuffer(videoFrameWaiting,vcaps,odmap.data,odmap.size) ;
 					}
-					gst_memory_unmap(vmem,&vmap) ;
 					gst_memory_unmap(odmem,&odmap) ;
 					gst_buffer_unref(GST_BUFFER_CAST(videoFrameWaiting));
+					gst_caps_unref(vcaps);
 					gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
 				}
 				/** Clean up the video frame queue **/
@@ -317,11 +315,6 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 	sinkpad = gst_element_get_static_pad(dec ,"sink") ;
 	gst_pad_link(p,sinkpad) ;
 	gst_object_unref(sinkpad);
-}
-
-static void processbuffer_stage3(void *A, int isz, void *oB, int obsz)
-{
-	int icnt;
 }
 
 /** demux pad handlers **/

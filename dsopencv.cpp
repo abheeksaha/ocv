@@ -73,6 +73,7 @@
 #include <gst/pbutils/encoding-profile.h>
 //#include <gst/base/gsttypefindhelper.h>
 
+#include "dsopencv.hpp"
 #define CV_WARN(...) CV_LOG_WARNING(NULL, "OpenCV | GStreamer warning: " << __VA_ARGS__)
 
 #define COLOR_ELEM "videoconvert"
@@ -97,7 +98,7 @@ static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteB
  * \return IplImage pointer. [Transfer Full]
  *  Retrieve the previously grabbed buffer, and wrap it in an IPLImage structure
  */
-bool retrieveFrame(GstBuffer * buf, GstCaps * caps, OutputArray dst)
+gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, Mat * img)
 {
     if (!buf)
         return false;
@@ -114,18 +115,16 @@ bool retrieveFrame(GstBuffer * buf, GstCaps * caps, OutputArray dst)
     {
         //something weird went wrong here. abort. abort.
         CV_WARN("Failed to map GStreamer buffer to system memory");
-        return false;
+        return NULL;
     }
 
     try
     {
-	    Mat src;
         if (isOutputByteBuffer)
-            src = Mat(Size(info.size, 1), CV_8UC1, info.data);
+            *img = Mat(Size(info.size, 1), CV_8UC1, info.data);
         else
-            src = Mat(sz, CV_MAKETYPE(CV_8U, channels), info.data);
-        CV_Assert(src.isContinuous());
-        src.copyTo(dst);
+            *img = Mat(sz, CV_MAKETYPE(CV_8U, channels), info.data);
+        CV_Assert(img->isContinuous());
     }
     catch (...)
     {
@@ -144,6 +143,7 @@ static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteB
     // bail out in no caps
     if (!GST_CAPS_IS_SIMPLE(frame_caps))
         return false;
+    g_print("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
 
     GstStructure* structure = gst_caps_get_structure(frame_caps, 0);  // no lifetime transfer
 
@@ -219,6 +219,7 @@ static gboolean determineFrameDims(Size &sz, gint& channels, bool& isOutputByteB
     {
         CV_Error_(Error::StsNotImplemented, ("Unsupported GStreamer layer type: %s", name.c_str()));
     }
+    g_print("Channels=%d sz.height=%d sz.width=%d\n",channels,sz.height,sz.width) ;
     return true;
 }
 
@@ -315,32 +316,111 @@ void toFraction(const double decimal, int &numerator_i, int &denominator_i)
 
 using namespace cv;
 using namespace std;
-gboolean frameToImg(GstBuffer *buf, GstCaps *caps)
+#include <vector>
+/** Write a vector of points to an output array and vice versa **/
+int writeToBuffer(vector<Point2f> vlist, char *op)
 {
-	Mat img;
-	return retrieveFrame(buf,caps,img) ;
+	char *pop = op ;
+	int step, tstep=0;
+	step = sprintf(pop,"Size:%d\n",vlist.size()) ;
+	pop += step ; tstep  += step;
+	for (vector<Point2f>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
+	{
+		step = sprintf(pop,"<%.4g %.4g>\n",it->x, it->y);
+		pop += step ; tstep  += step;
+	}
+	return tstep ;
+}
+
+vector<Point2f> readFromBuffer(char *op,int sz)
+{
+	char *pop = op ;
+	size_t size;
+	pop += sscanf(pop,"Size:%d\n",&size) ;
+	vector<Point2f>vlist(size) ;
+	for (int it=0; it<size; it++ )
+	{
+		float xv,yv ;
+		pop += sscanf(pop,"<%g %g>\n",&xv,&yv) ;
+		Point2f pv(xv,yv) ;
+		vlist.push_back(pv) ;
+	}
+	return vlist ;
+}
+
+gboolean frameToImg(GstBuffer *buf, GstCaps *caps, Mat *img)
+{
+	gboolean retval =  retrieveFrame(buf,caps,img);
+	return retval;
 }
 
 TermCriteria termcrit(TermCriteria::COUNT|TermCriteria::EPS,20,0.03);
-void stage1(cv::Mat img)
+int stage1(Mat img,void * pointlist)
 {
 	Mat gray;
     	vector<Point2f> points[2];
     	Size subPixWinSize(10,10), winSize(31,31);
 	const int MAX_COUNT = 500 ;
+	static bool addRemovePt = false ;
+	int size;
 
         cvtColor(img, gray, COLOR_BGR2GRAY);
 	goodFeaturesToTrack(gray, points[1], MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
 	cornerSubPix(gray, points[1], subPixWinSize, Size(-1,-1), termcrit);
+	size = writeToBuffer(points[1], (char *)pointlist) ;
+	return size;
 }
 
-void stage2(cv::Mat img, vector<Point2f> points)
+gboolean stage2(Mat img, void *pointlist, int size)
 {
 	vector<uchar> status;
 	vector<float> err;
+    	vector<Point2f> points[2];
 	Size winSize(31,31)  ;
-	if(prevImg.empty())
-		img.copyTo(prevImg);
+	Mat gray;
+	Mat prevGray ;
 
-	calcOpticalFlowPyrLK(prevImg, img, points[0], points[1], status, err, winSize, 3, termcrit, 0, 0.001);
+	points[1] = readFromBuffer(pointlist,size) ;
+        cvtColor(img, gray, COLOR_BGR2GRAY);
+	if(prevGray.empty())
+		img.copyTo(prevGray);
+
+        {
+            calcOpticalFlowPyrLK(prevGray, gray, points[0], points[1], status, err, winSize,
+                                 3, termcrit, 0, 0.001);
+            size_t i, k;
+            for( i = k = 0; i < points[1].size(); i++ )
+            {
+
+                if( !status[i] )
+                    continue;
+
+                points[1][k++] = points[1][i];
+                circle( img, points[1][i], 3, Scalar(0,255,0), -1, 8);
+            }
+            points[1].resize(k);
+
+	imshow("LK Demo", img);
+
+        swap(points[1], points[0]);
+        swap(prevGray, gray);
+        }
+	return true;
+}
+
+gboolean processBuffer(GstBuffer *vbuf, GstCaps *gcaps, void *metadata, int msz)
+{
+	Mat img ;
+	static char *data = NULL ;
+	gboolean res  ;
+	if (frameToImg(vbuf,gcaps,&img) == false) {
+		g_print("Something went wrong extracting image\n") ;
+		return false ;
+	}
+	if (!data) { data = malloc(8192*sizeof(char)) ; } 
+	int size  = stage1(img,data) ;
+	g_print("Stage 1 writes %d bytes\n",size) ;
+	res = stage2(img, data,size) ;
+	img.release() ;
+	return res ;
 }

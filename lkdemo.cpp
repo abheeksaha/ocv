@@ -59,24 +59,20 @@ int main( int argc, char** argv )
         //cap.open(input[0] - '0');
         //cap.open("rtspsrc location=rtsp://192.168.1.3:8554/test ! rtpvp8depay ! queue ! avdec_vp8 ! videoconvert !appsink",CAP_GSTREAMER);	
         //cap.open("rtspsrc location=rtsp://192.168.1.3:8554/test ! rtpvp8depay ! queue ! avdec_vp8 ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 !appsink",CAP_GSTREAMER);	
-        cap.open("filesrc location=v1.mp4 ! qtdemux !  avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 !appsink",CAP_GSTREAMER);	
+        cap.open("filesrc location=v1.webm ! matroskademux !  vp9dec ! videoconvert ! videoscale ! video/x-raw,width=640,height=480 !appsink",CAP_GSTREAMER);	
 	
  //   }
   //  else {
  //       cap.open(input);
  //   }
 
-    VideoWriter out("appsrc ! videoconvert ! videoscale ! vp9enc ! rtpvp9pay ! udpsink host=192.168.1.71 port=50019",CAP_GSTREAMER,0,30,Size(640,480),true);
+//    VideoWriter out("appsrc ! videoconvert ! videoscale ! vp9enc ! rtpvp9pay ! udpsink host=192.168.1.71 port=50019",CAP_GSTREAMER,0,30,Size(640,480),true);
     
 
     if( !cap.isOpened() )
     {
         cout << "Could not initialize capturing...\n";
         return 0;
-    }
-    else if (!out.isOpened())
-    {
-	    cout << "Could not initialize output...\n" ;
     }
 
     namedWindow( "LK Demo", 1 );
@@ -143,8 +139,8 @@ int main( int argc, char** argv )
         }
 
         needToInit = false;
-  //      imshow("LK Demo", image);
-	if( out.isOpened()) { pktsout++ ; out.write(image); }
+       imshow("LK Demo", image);
+//	if( out.isOpened()) { pktsout++ ; out.write(image); }
 
         char c = (char)waitKey(10);
         if( c == 27 )
