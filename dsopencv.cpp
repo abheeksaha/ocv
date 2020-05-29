@@ -142,7 +142,7 @@ static gboolean determineFrameDims(Size *sz, gint* channels, bool* isOutputByteB
     // bail out in no caps
     if (!GST_CAPS_IS_SIMPLE(frame_caps))
         return false;
-    g_print("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
+    GST_LOG("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
 
     GstStructure* structure = gst_caps_get_structure(frame_caps, 0);  // no lifetime transfer
 
@@ -218,7 +218,7 @@ static gboolean determineFrameDims(Size *sz, gint* channels, bool* isOutputByteB
     {
         CV_Error_(Error::StsNotImplemented, ("Unsupported GStreamer layer type: %s", name.c_str()));
     }
-    g_print("Channels=%d sz.height=%d sz.width=%d\n",*channels,sz->height,sz->width) ;
+    GST_INFO("Channels=%d sz.height=%d sz.width=%d\n",*channels,sz->height,sz->width) ;
     return true;
 }
 

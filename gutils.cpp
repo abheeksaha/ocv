@@ -408,9 +408,9 @@ gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_d
 	g_object_set(G_OBJECT(dsrc), "max-bytes", 3000 ,NULL) ;
 	g_object_set(G_OBJECT(dsrc), "do-timestamp", TRUE ,NULL) ;
 	g_object_set(G_OBJECT(dsrc), "min-percent", 50 ,NULL) ;
-	g_signal_connect(G_OBJECT(dsrc), "need-data", G_CALLBACK(src_dfw), dfw) ;
-	g_signal_connect(G_OBJECT(dsrc), "enough-data", G_CALLBACK(src_dfs), dfs) ;
-	g_signal_connect(GST_APP_SRC_CAST(dsrc),"end-of-stream", eosRcvd,d_eos) ;
+	if (src_dfw != NULL) g_signal_connect(G_OBJECT(dsrc), "need-data", G_CALLBACK(src_dfw), dfw) ;
+	if (src_dfs != NULL) g_signal_connect(G_OBJECT(dsrc), "enough-data", G_CALLBACK(src_dfs), dfs) ;
+	if (eosRcvd != NULL) g_signal_connect(GST_APP_SRC_CAST(dsrc),"end-of-stream", eosRcvd,d_eos) ;
 	if (caps != NULL)
 		gst_app_src_set_caps(dsrc,caps) ;
 	return TRUE ;

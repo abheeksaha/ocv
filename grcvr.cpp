@@ -191,9 +191,7 @@ int main( int argc, char** argv )
 			GstCaps *srccaps = gst_caps_new_simple (
 				"video/x-raw", 
 				NULL ) ;
-			g_object_set(G_OBJECT(D.vdisp), "is-live", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.vdisp), "do-timestamp", FALSE,NULL) ;
-			gst_app_src_set_caps(D.vdisp,srccaps) ;
+		 	dcvConfigAppSrc(D.vdisp, NULL , NULL, NULL , NULL, NULL, NULL,srccaps) ;
 		}
 	}
 
@@ -316,7 +314,7 @@ int main( int argc, char** argv )
 							}
 							else
 							{
-								g_print("Pushed video frame to display\n") ;
+								g_print("Pushed video frame to display (%d)\n",Dv.num_frames+1) ;
 								Dv.num_frames++ ;
 							}
 							gst_sample_unref(smp) ;
