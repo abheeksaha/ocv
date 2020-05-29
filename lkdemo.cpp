@@ -2,6 +2,7 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
+#include <unistd.h>
 
 #include <iostream>
 #include <ctype.h>
@@ -36,6 +37,8 @@ static void onMouse( int event, int x, int y, int /*flags*/, void* /*param*/ )
 }
 
 #include <gst/gst.h>
+extern int writeToBuffer(vector<Point2f> vlist, char *op) ;
+extern gboolean readFromBuffer(char *op,int sz, vector<Point2f> * pvlist) ;
 int main( int argc, char** argv )
 {
     VideoCapture cap;
@@ -43,7 +46,7 @@ int main( int argc, char** argv )
     Size subPixWinSize(10,10), winSize(31,31);
 
     const int MAX_COUNT = 500;
-    bool needToInit = false;
+    bool needToInit = true;
     bool nightMode = false;
     int pktsout=0;
 
@@ -80,6 +83,7 @@ int main( int argc, char** argv )
 
     Mat gray, prevGray, image, frame;
     vector<Point2f> points[2];
+    vector<Point2f> pointsg;
 
     for(;;)
     {
@@ -87,6 +91,7 @@ int main( int argc, char** argv )
         if( frame.empty() )
             break;
 
+	sleep(1) ;
         frame.copyTo(image);
         cvtColor(image, gray, COLOR_BGR2GRAY);
 
@@ -96,9 +101,16 @@ int main( int argc, char** argv )
         if( needToInit )
         {
             // automatic initialization
-            goodFeaturesToTrack(gray, points[1], MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
-            cornerSubPix(gray, points[1], subPixWinSize, Size(-1,-1), termcrit);
+	    char op[8192] ;
+	    int nb ;
+            goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
+            cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
             addRemovePt = false;
+	    nb = writeToBuffer(pointsg,op) ;
+	    printf("Number of bytes written:%d\n",nb) ;
+		if (readFromBuffer(op,8192, &points[1]) == false) {
+			fprintf(stderr,"Read/Write operation failed!\n") ; 
+		}
         }
         else if( !points[0].empty() )
         {
@@ -139,6 +151,7 @@ int main( int argc, char** argv )
         }
 
         needToInit = false;
+	pktsout++ ; printf("Frame number:%d\n",pktsout) ;
        imshow("LK Demo", image);
 //	if( out.isOpened()) { pktsout++ ; out.write(image); }
 

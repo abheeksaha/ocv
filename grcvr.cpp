@@ -9,6 +9,11 @@
 #include "gutils.hpp"
 #include "rseq.hpp"
 #include "dsopencv.hpp"
+#include "opencv2/video/tracking.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include "opencv2/highgui.hpp"
+
 
 #define MAX_STAY 1
 static void help(char *name)
@@ -23,6 +28,7 @@ typedef struct {
 	GstAppSink *vsink;
 	GstAppSink *dsink;
 	GstAppSrc *usrc ;
+	GstAppSrc *vdisp;
 	/** Input elements **/
 	GstCaps *vcaps,*dcaps;
 	/* Output elements **/
@@ -50,10 +56,9 @@ gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static char srcdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! tee name=tpoint \
-tpoint.src_0 ! queue ! appsink name=vsink \
-tpoint.src_1 ! queue ! fakesink \
-rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink ";
+rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
+rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
+appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! autovideosink";
 
 
 extern bufferCounter_t inbc,outbc;
@@ -70,12 +75,15 @@ int main( int argc, char** argv )
 	gboolean stage1 = FALSE ;
 	gboolean tx=TRUE ;
 	gint vfmatch=0;
+	static dcvFrameData_t Dv ;
 
 	guint ctr=0;
+	int pktsout=0;
 	struct timeval lastCheck;
 	struct timezone tz;
 	char clientipaddr[1024];
 
+	Dv.num_frames = 0 ;
 	while ((ch = getopt(argc, argv, "r:h")) != -1) {
 		if (ch == 'r')
 		{
@@ -103,6 +111,7 @@ int main( int argc, char** argv )
 	D.usrcstate.state = G_BLOCKED;
 	D.usrcstate.length = 0;
 	D.usrcstate.finished = FALSE ;
+
 
 	/** Configure the end-points **/
 	{
@@ -172,16 +181,19 @@ int main( int argc, char** argv )
 				NULL ) ;
 			dcvConfigAppSrc(D.usrc,dataFrameWrite,&D.usrcstate, dataFrameStop,&D.usrcstate, eosRcvdSrc,&D.ftc->eosIn,srccaps) ;
 			g_object_set(G_OBJECT(D.usrc), "is-live", TRUE,NULL) ;
-			g_object_set(G_OBJECT(D.usrc), "do-timestamp", FALSE,NULL) ;
+			g_object_set(G_OBJECT(D.usrc), "do-timestamp", TRUE,NULL) ;
 //			dcvAttachBufferCounterIn(GST_ELEMENT_CAST(D.usrc),&inbc) ;
 
 		}
 		{
-			GstElement * tp = gst_bin_get_by_name ( GST_BIN(D.pipeline), "tpoint") ;
-			if (tp) {
-			g_object_set(G_OBJECT(tp),"has-chain",TRUE, NULL) ;
-			g_object_set(G_OBJECT(tp),"allow-not-linked",TRUE, NULL) ;
-			}
+			D.vdisp = GST_APP_SRC_CAST(gst_bin_get_by_name( GST_BIN(D.pipeline), "vdisp")) ;
+			g_assert(D.vdisp) ;
+			GstCaps *srccaps = gst_caps_new_simple (
+				"video/x-raw", 
+				NULL ) ;
+			g_object_set(G_OBJECT(D.vdisp), "is-live", TRUE,NULL) ;
+			g_object_set(G_OBJECT(D.vdisp), "do-timestamp", FALSE,NULL) ;
+			gst_app_src_set_caps(D.vdisp,srccaps) ;
 		}
 	}
 
@@ -235,14 +247,14 @@ int main( int argc, char** argv )
 				int bpushed ;
 				if (D.usrcstate.finished != TRUE) {
 					bpushed = dcvPushBytes(D.usrc,D.ftc,&D.usrcstate.finished) ;
-					if (bpushed)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
+					if (bpushed)GST_INFO("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
 					if (D.usrcstate.finished == TRUE) {
 						g_print("End of stream achieved\n") ;
 					}
 				}
 				else { /** Connection closed from sender side, try and clear out the packets **/
 					bpushed = dcvPushBuffered(D.usrc,D.ftc) ;
-					if (bpushed)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
+					if (bpushed)GST_INFO("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
 					if (D.ftc->totalbytes == D.ftc->spaceleft) {
 						g_print("End of stream and no buffered bytes left\n") ;
 						gst_app_src_end_of_stream(D.usrc) ;
@@ -266,17 +278,17 @@ int main( int argc, char** argv )
 
 				if ( ((vfmatch = dcvFindMatchingContainer(D.videoframequeue.bufq,dataFrameContainer)) == -1) &&
 			       	      (vfmatch >= g_queue_get_length(D.videoframequeue.bufq))){
-					g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",vfmatch, g_queue_get_length(D.videoframequeue.bufq), g_queue_get_length(D.olddataqueue.bufq)) ;
+					GST_ERROR("no match found: vfmatch=%d (vq=%u dq=%u)\n",vfmatch, g_queue_get_length(D.videoframequeue.bufq), g_queue_get_length(D.olddataqueue.bufq)) ;
 					if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
 						dcvBufContainerFree(dataFrameContainer) ;
 						free(dataFrameContainer) ;
-						g_print("Dropping data buffer, no match for too long\n") ;
+						GST_ERROR("Dropping data buffer, no match for too long\n") ;
 					}
 					else 
 						g_queue_push_tail(D.olddataqueue.bufq,dataFrameContainer) ;
 
 					gettimeofday(&lastCheck,&tz) ;
-					g_print("Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
+					GST_ERROR("Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
 					continue ;
 				}
 				{
@@ -288,9 +300,28 @@ int main( int argc, char** argv )
 					GstMapInfo odmap;
 					gboolean match=FALSE ;
 					odmem = gst_buffer_get_all_memory(dataFrameWaiting) ;
-					if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
+					if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { GST_ERROR("Couldn't map memory in dbuffer\n") ; }
 					{
-						processBuffer(videoFrameWaiting,vcaps,odmap.data,odmap.size) ;
+						cv::Mat omg = processBuffer(videoFrameWaiting,vcaps,odmap.data,odmap.size,&Dv) ;
+						GstBuffer *gb = cv::writeFrame(&omg,&Dv) ;
+						GstSample *smp ;
+						GstFlowReturn ret ;
+						if (gb == NULL) {
+							g_print("Convert Frame error!\n") ;
+						}
+						else {
+							smp = gst_sample_new(gb,vcaps,NULL,NULL) ;
+							if ( (ret = gst_app_src_push_sample(D.vdisp,smp)) != GST_FLOW_OK) {
+								g_print("Gst App Src Push returned a problem\n") ;
+							}
+							else
+							{
+								g_print("Pushed video frame to display\n") ;
+								Dv.num_frames++ ;
+							}
+							gst_sample_unref(smp) ;
+						}
+						omg.release() ;
 					}
 					gst_memory_unmap(odmem,&odmap) ;
 					gst_buffer_unref(GST_BUFFER_CAST(videoFrameWaiting));

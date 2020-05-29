@@ -54,7 +54,7 @@ static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! tee
 			  appsrc name=dsrc ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
-			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! videoscale ! tee name=tpoint2 \
+			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! tee name=tpoint2 \
 				  tpoint2.src_0 ! queue ! fakesink \
 				  tpoint2.src_1 ! queue ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
@@ -208,7 +208,7 @@ int main( int argc, char** argv )
 #if VP9PAY
 #endif
 	else if (!mqsrc) {
-		g_printerr("Couldn't get static pad for message \n") ;
+		g_print("Couldn't get static pad for message \n") ;
 	}
 	else if (gst_pad_is_linked(mqsrc)){
 			g_print("%s:%s (mqsrc) linked to %s:%s\n",
@@ -225,13 +225,13 @@ int main( int argc, char** argv )
 
 	ret = gst_element_set_state (D.pipeline, GST_STATE_PLAYING);
 	if (ret == GST_STATE_CHANGE_FAILURE) {
-		g_printerr ("Unable to set the pipeline to the playing state.\n");
+		g_print ("Unable to set the pipeline to the playing state.\n");
 		gst_object_unref (D.pipeline);
 		return -1;
 	}
 	ret = gst_element_set_state(GST_ELEMENT_CAST(D.dsrc),GST_STATE_PLAYING) ;
 	if (ret == GST_STATE_CHANGE_FAILURE) {
-		g_printerr ("Unable to set data src to the playing state.\n");
+		g_print ("Unable to set data src to the playing state.\n");
 		return -1;
 	}
 	GstClockTime dp,op;
@@ -245,7 +245,7 @@ int main( int argc, char** argv )
 
 	ret = gst_element_set_state(GST_ELEMENT_CAST(D.vsink),GST_STATE_PLAYING) ;
 	if (ret == GST_STATE_CHANGE_FAILURE) {
-		g_printerr ("Unable to set vsink to the playing state.\n");
+		g_print ("Unable to set vsink to the playing state.\n");
 		return -1;
 	}
 
@@ -283,7 +283,7 @@ int main( int argc, char** argv )
 					dmem = gst_buffer_get_all_memory(databuf) ;
 					if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
 					if (gst_memory_map(dmem, &dmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in dbuffer\n") ; }
-					g_print("Input:%d o/p:%d..",vmap.size,dmap.size) ;
+					GST_TRACE("Input:%d o/p:%d..",vmap.size,dmap.size) ;
 					pd = (unsigned long *)dmap.data ;
 					dcvTagBuffer(vmap.data,vmap.size,pd,dmap.size) ;
 					gst_memory_unmap(dmem,&dmap);
@@ -294,7 +294,7 @@ int main( int argc, char** argv )
 					{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 
-						g_print("Pushing data buffer...(%d)...remaining(%u)\n",
+						GST_INFO("Pushing data buffer...(%d)...remaining(%u)\n",
 								ret,g_queue_get_length(D.dq.bufq)) ;
 					}
 					sendBuffer = TRUE ;
@@ -308,7 +308,7 @@ int main( int argc, char** argv )
 			GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.dsrc),"src") ;
 			g_assert(spad) ;
 			if (gst_pad_push_event(spad,gevent) != TRUE) {
-				g_print("Sorry, couldn't push eos event, even though I am done\n") ;
+				GST_ERROR("Sorry, couldn't push eos event, even though I am done\n") ;
 			}
 			else gst_event_unref(gevent) ;
 		}

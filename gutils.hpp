@@ -36,8 +36,8 @@ typedef unsigned int u32 ;
 typedef void (*src_dfw_fn_t)(GstAppSrc *, guint, gpointer) ;
 typedef void (*src_dfs_fn_t)(GstAppSrc *, gpointer) ;
 
-typedef void (*sink_preroll_fn_t)(GstAppSink *, gpointer) ;
-typedef void (*sink_sample_fn_t)(GstAppSink *, gpointer) ;
+typedef GstFlowReturn (*sink_preroll_fn_t)(GstAppSink *, gpointer) ;
+typedef GstFlowReturn (*sink_sample_fn_t)(GstAppSink *, gpointer) ;
 typedef void (*sink_eos_fn_t)(GstAppSink *, gpointer) ;
 typedef void (*src_eos_fn_t)(GstAppSrc *, gpointer) ;
 gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_samp, sink_preroll_fn_t sink_pre, void *d_pre, sink_eos_fn_t eosRcvd, void *d_eos)  ;
