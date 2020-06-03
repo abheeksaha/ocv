@@ -74,6 +74,7 @@
 //#include <gst/base/gsttypefindhelper.h>
 
 #include "dsopencv.hpp"
+#include "gutils.hpp"
 #define CV_WARN(...) CV_LOG_WARNING(NULL, "OpenCV | GStreamer warning: " << __VA_ARGS__)
 
 #define COLOR_ELEM "videoconvert"
@@ -294,7 +295,7 @@ using namespace cv;
 using namespace std;
 #include <vector>
 	/** Write a vector of points to an output array and vice versa **/
-int writeToBuffer(vector<Point2f> vlist, char *op)
+int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
@@ -364,7 +365,7 @@ gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
 	else return false ;
 }
 	
-int stage1(Mat img,void * pointlist)
+int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 {
 	Mat gray;
     	vector<Point2f> pointsg;
@@ -379,13 +380,13 @@ int stage1(Mat img,void * pointlist)
 
 		--count ;
 		if (count == 0) {
-			size = writeToBuffer(pointsg, (char *)pointlist) ;
+			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 			count = 2 ;
 		}
 		else
 		{
 			pointsg.resize(0) ;
-			size = writeToBuffer(pointsg, (char *)pointlist) ;
+			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 		}
 		g_print("Stage1:return %d bytes\n",size) ;
 
@@ -393,7 +394,7 @@ int stage1(Mat img,void * pointlist)
 	return size;
 }
 	
-gboolean stage2(Mat img, void *pointlist, int size)
+int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 {
 	vector<uchar> status;
 	vector<float> err;
@@ -407,7 +408,7 @@ gboolean stage2(Mat img, void *pointlist, int size)
         cvtColor(img, gray, COLOR_BGR2GRAY);
 	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, &points1)) == -1)) {
 	       g_print("Read from buffer failed\n")	;
-	       return false ;
+	       return -1 ;
 	}
 	else if (nitems == 0) g_print("No new points, please carry on using old points\n") ;
 	if (!points0.empty())
@@ -431,21 +432,70 @@ gboolean stage2(Mat img, void *pointlist, int size)
 //imshow...	
 	swap(points1, points0);
 	swap(prevGray, gray);
-	return true;
+	return 0;
 }
 	
-Mat processBuffer(GstBuffer *vbuf, GstCaps *gcaps, void *metadata, int msz,dcvFrameData_t *df)
+/** Main platform functions **/
+#define MAXSTAGEDATASIZE 16384
+int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb, GstBuffer **newdb)
 {
 	Mat img;
-	static char *data = NULL ;
 	gboolean res  ;
+	char opdata[MAXSTAGEDATASIZE] ;
+	int size;
 	if (frameToImg(vbuf,gcaps,&img,df) == false) {
 		printf("Something went wrong extracting image\n") ;
-		return img ;
+		return -1 ;
 	}
-	if (!data) { data = malloc(8192*sizeof(char)) ; } 
-	int size  = stage1(img,data) ;
+	if (dbuf != NULL ) {
+		GstMemory *odmem = gst_buffer_get_all_memory(dbuf) ;
+		GstMapInfo odmap ;
+		g_assert(odmem) ;
+		if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) {
+			g_print("Memory mapping for data buf failed!\n") ;
+			return -1 ;
+		}
+		else 
+		{
+			char *op = odmap.data ;
+			op += getTagSize() ;
+			size  = stage(img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
+			gst_memory_unmap(odmem,&odmap) ;
+		}
+	}
+	else {
+		size = stage(img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
+	}
 	g_print("Stage 1 writes %d bytes\n",size) ;
-	res = stage2(img, data,size) ;
-	return img ;
+	
+	if (size > 0)
+	{
+		GstMemory *vmem,*dmem;
+		GstMapInfo vmap,dmap ;
+		char *obuf ;
+		vmem = gst_buffer_get_all_memory(vbuf) ;
+		if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) {
+			g_print("Memory mapping for old video buf failed!\n") ;
+			return -1 ;
+		}
+		*newdb = gst_buffer_new_allocate(NULL,getTagSize() + size,NULL) ;
+		dmem = gst_buffer_get_all_memory(*newdb) ;
+		if (gst_memory_map(dmem, &dmap, GST_MAP_READ) != TRUE) {
+			g_print("Memory mapping for new data buf failed!\n") ;
+			return -1 ;
+		}
+		obuf = dmap.data ;
+		dcvTagBuffer(vmap.data,vmap.size,(void *)dmap.data,getTagSize()) ;
+	
+		obuf += getTagSize() ;
+		memcpy(obuf,opdata,size) ;
+		gst_memory_unmap(dmem,&dmap) ;
+		gst_memory_unmap(vmem,&vmap) ;
+	}
+	else
+		*newdb = NULL ;
+	
+	/** Now convert img back to buffer **/
+	*newvb = cv::writeFrame(&img, df) ;
+	return size ;
 }

@@ -150,7 +150,7 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 		pd->seq[i] = rseq[i] ;
 	pd->checksum=0;
 	/* Now write the checksum at the end */
-	GST_INFO("Tag:count=%u tstmp=%u Sequence of size %u ", pd->count,pd->tstmp, RSEQSIZE) ;
+	g_print("Tag:count=%u tstmp=%u Sequence of size %u ", pd->count,pd->tstmp, RSEQSIZE) ;
 	for (i=0; i<RSEQSIZE; i++)
 	{
 		if (rseq[i] >= isz/sizeof(u32)) {
@@ -158,10 +158,10 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 				rseq[i], isz) ;
 			g_assert(rseq[i] < (isz/sizeof(u32))) ;
 		}
-		GST_INFO("pA[%u]=%u ",rseq[i],pA[rseq[i]]) ;
+		g_print("pA[%u]=%u ",rseq[i],pA[rseq[i]]) ;
 		pd->checksum ^= pA[rseq[i]] ;
 	}
-	GST_INFO("Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
+	g_print("Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
 }
 
 gint dcvTimeDiff(struct timeval t1, struct timeval t2)
@@ -290,17 +290,17 @@ GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 	gchar *gs;
 	if (d == NULL) 
 	{
-		GST_INFO("New Preroll in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		g_print("New Preroll in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK ;
 	}
 	dcv_bufq_t *D = (dcv_bufq_t *)d ;
 	GstSample *gsm ;
 	if ((gsm = gst_app_sink_pull_preroll(slf)) != NULL)
 	{
-		GST_INFO("New Preroll in %s: %u --",GST_ELEMENT_NAME(slf),g_queue_get_length(D->bufq)) ;
+		g_print("New Preroll in %s: %u --",GST_ELEMENT_NAME(slf),g_queue_get_length(D->bufq)) ;
 		dbt = gst_sample_get_caps(gsm) ;
 		gs = gst_caps_to_string(dbt);
-		GST_INFO("Data Received: caps %s \n",gs) ;
+		g_print("Data Received: caps %s \n",gs) ;
 		g_free(gs) ;
 		gst_sample_unref(gsm) ;
 		gst_caps_unref(dbt) ;
@@ -314,7 +314,7 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 {
 	int cnt=0;
 	if (d == NULL) {
-		GST_INFO("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK;
 	}
 
@@ -330,7 +330,7 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 		gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
 		g_queue_push_tail(D->bufq,bcnt) ;
 		gettimeofday(&D->lastData,&D->tz) ;
-		GST_INFO("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),D->lastData.tv_sec, D->lastData.tv_usec,g_queue_get_length(D->bufq)) ;
+		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),D->lastData.tv_sec, D->lastData.tv_usec,g_queue_get_length(D->bufq)) ;
 		return GST_FLOW_OK;
 	}
 	else
@@ -428,18 +428,27 @@ gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_sa
 	return TRUE;
 }
 
-void bufferCounterInit(bufferCounter_t *ic, bufferCounter_t *oc )
+int dcvLocalDisplay(GstBuffer *gb, GstCaps *vcaps, GstAppSrc *vdisp, int num_frames)
 {
-	oc->bytecount = oc->buffercount = 0 ;
-	ic->bytecount = ic->buffercount = 0 ;
-	signal(SIGHUP, bufferCounterDump) ;
-	signal(SIGINT, bufferCounterDump) ;
-	signal(SIGUSR1, bufferCounterDump) ;
-}
-void bufferCounterDump(int signalnum)
-{
-	extern gboolean sigrcvd;
-	g_print("Received %d: inbuffer=%u inbytes=%u outbuffer=%u outbytes=%u\n",signalnum,
-			inbc.buffercount,inbc.bytecount,outbc.buffercount,outbc.bytecount) ;
-	exit(4) ;
+	GstSample *smp ;
+	GstFlowReturn ret ;
+	int rval;
+	if (gb == NULL) {
+		g_print("Convert Frame error!\n") ;
+		return -1 ;
+	}
+	else {
+		smp = gst_sample_new(gb,vcaps,NULL,NULL) ;
+		if ( (ret = gst_app_src_push_sample(vdisp,smp)) != GST_FLOW_OK) {
+			g_print("Gst App Src Push returned a problem\n") ;
+			rval = -1 ;
+		}
+		else
+		{
+			g_print("Pushed video frame to display (%d)\n",num_frames+1) ;
+			rval = 1 ;
+		}
+		gst_sample_unref(smp) ;
+		return rval ;
+	}
 }

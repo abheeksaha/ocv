@@ -177,7 +177,7 @@ int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 	int nbytes,tbytes=0 ;
 	gboolean forceflush=TRUE ;
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
-	GST_LOG("dcvPushBytes: Starting with maxbytes=%u, space avail=%u\n",maxbytes,D->spaceleft) ;
+	g_print("dcvPushBytes: Starting with maxbytes=%u, space avail=%u\n",maxbytes,D->spaceleft) ;
 	while (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
 		while ( D->spaceleft > 0 && *pfinished == FALSE) {
 			nbytes = recv(D->insock,D->pbuf,D->spaceleft,0) ;
@@ -221,18 +221,18 @@ GstFlowReturn dcvAppSinkNewPreroll(GstAppSink *slf, gpointer d)
 {
 	GstCaps * dbt = NULL ;
 	gchar *gs;
+	g_print("New Preroll in %s:\n",GST_ELEMENT_NAME(slf)) ;
 	if (d == NULL) 
 	{
-		GST_INFO("New Preroll in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK ;
 	}
 	GstSample *gsm ;
 	if ((gsm = gst_app_sink_pull_preroll(slf)) != NULL)
 	{
-		GST_INFO("New Preroll in %s: --",GST_ELEMENT_NAME(slf)) ;
+		g_print("New Preroll in %s: --",GST_ELEMENT_NAME(slf)) ;
 		dbt = gst_sample_get_caps(gsm) ;
 		gs = gst_caps_to_string(dbt);
-		GST_INFO(" caps %s \n",gs) ;
+		g_print(" caps %s \n",gs) ;
 		g_free(gs) ;
 		gst_sample_unref(gsm) ;
 		gst_caps_unref(dbt) ;
@@ -245,8 +245,8 @@ GstFlowReturn dcvAppSinkNewPreroll(GstAppSink *slf, gpointer d)
 GstFlowReturn dcvAppSinkNewSample(GstAppSink *slf, gpointer d)
 {
 	dcv_ftc_t *D = (dcv_ftc_t *)d ;
+	g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 	if (d == NULL) {
-		GST_INFO("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK;
 	}
 
@@ -304,8 +304,6 @@ gboolean dcvSendBuffer (GstBuffer *b, gpointer d)
 	gst_memory_unmap(bmem,&bmap) ;
 	return rval ;
 }
-
-
 
 
 

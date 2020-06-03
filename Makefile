@@ -21,8 +21,8 @@ all: gdyn grcvr gsproc
 
 test: client server
 
-gdyn: gdyn.o gsftc.o gutils.o $(DEPFILES)
-	$(LDCPP) -o $@ gdyn.o gsftc.o gutils.o $(LDFLAGS) -lm
+gdyn: gdyn.o gsftc.o gutils.o dsopencv.o $(DEPFILES)
+	$(LDCPP) -o $@ gdyn.o gsftc.o gutils.o dsopencv.o  $(LDFLAGS) -lopencv_world -lm
 
 grcvr : grcvr.o gutils.o gsftc.o dsopencv.o $(DEPFILES)
 	$(LDCPP) -o $@ grcvr.o gutils.o gsftc.o dsopencv.o $(LDFLAGS) -lopencv_world  -lm

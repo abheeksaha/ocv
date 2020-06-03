@@ -76,6 +76,7 @@ int main( int argc, char** argv )
 	gboolean tx=TRUE ;
 	gint vfmatch=0;
 	static dcvFrameData_t Dv ;
+	gboolean localdisplay = TRUE ;
 
 	guint ctr=0;
 	int pktsout=0;
@@ -260,7 +261,7 @@ int main( int argc, char** argv )
 				}
 
 			}
-			while (!g_queue_is_empty(D.videoframequeue.bufq)&& !g_queue_is_empty(D.olddataqueue.bufq)) 
+			while (!g_queue_is_empty(D.videoframequeue.bufq) && !g_queue_is_empty(D.olddataqueue.bufq)) 
 			{
 				int stay=0;
 				ctr = 0 ;
@@ -274,8 +275,8 @@ int main( int argc, char** argv )
 				       g_print("No data frame ...very strange\n") ;
 				}
 
-				if ( ((vfmatch = dcvFindMatchingContainer(D.videoframequeue.bufq,dataFrameContainer)) == -1) &&
-			       	      (vfmatch >= g_queue_get_length(D.videoframequeue.bufq))){
+				if ( ((vfmatch = dcvFindMatchingContainer(D.videoframequeue.bufq,dataFrameContainer)) == -1) ) {
+//						&& (vfmatch >= g_queue_get_length(D.videoframequeue.bufq))){
 					GST_ERROR("no match found: vfmatch=%d (vq=%u dq=%u)\n",vfmatch, g_queue_get_length(D.videoframequeue.bufq), g_queue_get_length(D.olddataqueue.bufq)) ;
 					if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
 						dcvBufContainerFree(dataFrameContainer) ;
@@ -291,37 +292,20 @@ int main( int argc, char** argv )
 				}
 				{
 					dcv_BufContainer_t *qe = ((dcv_BufContainer_t *)g_queue_pop_nth(D.videoframequeue.bufq,vfmatch)) ;
+					GstBuffer * newVideoFrame = NULL ;
+					GstBuffer * newDataFrame = NULL ;
 					dataFrameWaiting = dataFrameContainer->nb;
 					videoFrameWaiting = qe->nb ;
 					GstCaps *vcaps = qe->caps ;
-					GstMemory *odmem;
-					GstMapInfo odmap;
-					gboolean match=FALSE ;
-					odmem = gst_buffer_get_all_memory(dataFrameWaiting) ;
-					if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) { GST_ERROR("Couldn't map memory in dbuffer\n") ; }
-					{
-						cv::Mat omg = processBuffer(videoFrameWaiting,vcaps,odmap.data,odmap.size,&Dv) ;
-						GstBuffer *gb = cv::writeFrame(&omg,&Dv) ;
-						GstSample *smp ;
-						GstFlowReturn ret ;
-						if (gb == NULL) {
-							g_print("Convert Frame error!\n") ;
-						}
-						else {
-							smp = gst_sample_new(gb,vcaps,NULL,NULL) ;
-							if ( (ret = gst_app_src_push_sample(D.vdisp,smp)) != GST_FLOW_OK) {
-								g_print("Gst App Src Push returned a problem\n") ;
-							}
-							else
-							{
-								g_print("Pushed video frame to display (%d)\n",Dv.num_frames+1) ;
-								Dv.num_frames++ ;
-							}
-							gst_sample_unref(smp) ;
-						}
-						omg.release() ;
-					}
-					gst_memory_unmap(odmem,&odmap) ;
+					dcvProcessStage( videoFrameWaiting, vcaps,dataFrameWaiting, &Dv, stage2, &newVideoFrame ,&newDataFrame) ;
+					if (localdisplay == TRUE) 
+						if (dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,Dv.num_frames) != -1) Dv.num_frames++ ;
+					/**
+					if (newDataFrame != NULL) 
+						dcvPushMetaData(newDataFrame) ;
+						**/
+
+						
 					gst_buffer_unref(GST_BUFFER_CAST(videoFrameWaiting));
 					gst_caps_unref(vcaps);
 					gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
@@ -329,8 +313,6 @@ int main( int argc, char** argv )
 				/** Clean up the video frame queue **/
 			}
 		}
-		if (ctr == 5000)
-			walkPipeline(D.pipeline,0) ;
 	} while (terminate == FALSE) ;
 	g_print("Exiting!\n") ;
 }
@@ -399,4 +381,3 @@ static void demuxpadRemoved(GstElement *s, guint pt, GstPad *P, gpointer d)
 {
 	g_print("Received pad removed signal for pt=%d, %s\n",pt, GST_PAD_NAME(P)) ;
 }
-
