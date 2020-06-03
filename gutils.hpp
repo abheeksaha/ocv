@@ -79,4 +79,5 @@ int getTagSize(void) ;
 void bufferCounterInit(bufferCounter_t *i, bufferCounter_t *o) ;
 void bufferCounterDump(int signalnum) ;
 
+int dcvLocalDisplay(GstBuffer *gb, GstCaps *vcaps, GstAppSrc *vdisp, int num_frames) ;
 #endif
