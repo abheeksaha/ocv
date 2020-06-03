@@ -12,7 +12,7 @@
 #include "dsopencv.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n",name) ;  
+	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display)\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -51,13 +51,13 @@ static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! tee
 			  rtpmux name=mux ! queue ! appsink name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale !  queue ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
-			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! autovideosink \
+			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
 			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
-			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! autovideosink \
+			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
 int main( int argc, char** argv )
@@ -69,11 +69,13 @@ int main( int argc, char** argv )
 	char ch;
 	extern char *optarg;
 	static guint ctr=0;
-	char *pipedesc = fdesc;
+	char pipedesc[8192];
+	char *pdesc = fdesc;
 	gboolean inputfromnet=FALSE ;
 	guint txport = 50018;
 	guint rxport = 0;
 	gboolean dotx = TRUE ;
+	gboolean localdisplay = false ;
 	char clientipaddr[1024];
 	char videofile[1024] ; 
 	static dcvFrameData_t Dv ;
@@ -83,7 +85,7 @@ int main( int argc, char** argv )
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 
-	while ((ch = getopt(argc, argv, "p:i:f:hn:")) != -1) {
+	while ((ch = getopt(argc, argv, "p:i:f:hn:l")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -91,7 +93,8 @@ int main( int argc, char** argv )
 		if (ch == 'h') { help(argv[0]); exit(3) ; }
 		if (ch == 'i') { strcpy(clientipaddr,optarg) ;  }
 		if (ch == 'f') { strcpy(videofile, optarg) ;  }
-		if (ch == 'n') { inputfromnet=TRUE; pipedesc = ndesc ; rxport = atoi(optarg) ;  }
+		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
+		if (ch == 'l') { localdisplay=TRUE;  }
 	}
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (my_category, "gdyn", 0, "This is my very own");
@@ -99,6 +102,12 @@ int main( int argc, char** argv )
 	g_print("Using txport = %u\n",txport) ;
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc, *srcpad ;
+	if (localdisplay) {
+		sprintf(pipedesc,pdesc,"autovideosink") ;
+	}
+	else {
+		sprintf(pipedesc,pdesc,"fakesink") ;
+	}
 
 	gerr = NULL ;
 	GError * error = NULL;
