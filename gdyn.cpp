@@ -38,6 +38,7 @@ typedef struct {
 	dcv_ftc_t *ftc;
 } dpipe_t ;
 
+int dcvDebug=0;
 #include <getopt.h>
 #include "gutils.hpp"
 #include "rseq.hpp"
@@ -79,6 +80,7 @@ int main( int argc, char** argv )
 	char clientipaddr[1024];
 	char videofile[1024] ; 
 	static dcvFrameData_t Dv ;
+	int numDataFrames=0;
 	gboolean vdispEos = false ;
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
@@ -129,7 +131,7 @@ int main( int argc, char** argv )
 	D.eos = FALSE ;
 	D.eosDsrc = D.eosVdisp = FALSE ;
 	D.vsinkq=0 ;
-	D.dq.bufq = g_queue_new() ;
+	dcvBufQInit(&D.dq) ;
 	D.dsrcstate.state = G_BLOCKED;
 	D.dsrcstate.length = 0;
 	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
@@ -278,14 +280,14 @@ int main( int argc, char** argv )
 				GstBuffer * newVideoFrame ;
 				GstBuffer * databuf ;
 				if (v!=NULL) {
-					dcvProcessStage(v,vcaps,NULL,&Dv,stage1,&newVideoFrame ,&databuf) ;
+					databuf = dcvProcessStage(v,vcaps,NULL,&Dv,stage1,&newVideoFrame) ;
 
 // Add a message dat	
-					if (dotx) 
+					if (dotx && (databuf != NULL) )
 					{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
-						g_print("Pushing data buffer...(%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
-								ret,g_queue_get_length(D.dq.bufq),D.eosDsrc, D.ftc->eosOut, D.eosVdisp, D.eos) ;
+						g_print("Pushing data buffer number %d...(ret=%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
+								++numDataFrames, ret,g_queue_get_length(D.dq.bufq),D.eosDsrc, D.ftc->eosOut, D.eosVdisp, D.eos) ;
 					}
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
@@ -294,7 +296,6 @@ int main( int argc, char** argv )
 			}
 		}
 		if ((D.eos == TRUE  && g_queue_is_empty(D.dq.bufq)) || terminate == TRUE) {
-#if 1
 			GstEvent *gevent = gst_event_new_eos() ;
 			GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.dsrc),"src") ;
 			g_assert(spad) ;
@@ -302,7 +303,6 @@ int main( int argc, char** argv )
 				GST_ERROR("Sorry, couldn't push eos event, even though I am done\n") ;
 			}
 			else gst_event_unref(gevent) ;
-#endif
 		}
 		if (D.ftc->eosOut == true) {
 			g_print("Received eos on usink...exiting\n") ;

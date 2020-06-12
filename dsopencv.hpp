@@ -23,7 +23,7 @@ namespace cv {
 gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, cv::Mat * img,dcvFrameData_t *df) ;
 GstBuffer * writeFrame( const cv::Mat * img, dcvFrameData_t *df) ;
 } 
-int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb, GstBuffer **newdb) ;
+GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb) ;
 int stage1(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
 int stage2(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
 int stagen(cv::Mat img, void *pointlist, int size, void *dataout, int outdatasize) ;

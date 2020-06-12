@@ -394,6 +394,47 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 	return size;
 }
 	
+int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasize)
+{
+	vector<uchar> status;
+	vector<float> err;
+    	static vector<Point2f> pointsg;
+    	Size subPixWinSize(10,10), winSize(31,31);
+	static Mat gray;
+	static Mat prevGray ;
+	int nitems;
+	int i,size=0;
+	const int MAX_COUNT = 500 ;
+	
+        cvtColor(img, gray, COLOR_BGR2GRAY);
+	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
+	cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
+#if 0
+	if (size >0 && ( (nitems = readFromBuffer(pointlist,pointsize, &points1)) == -1)) {
+	       g_print("Read from buffer empty\n")	;
+	       return -1 ;
+	}
+	else if (nitems == 0) g_print("No new points, please carry on using old points\n") ;
+	else if (!points1.empty())
+        {
+		int i,k;
+            for( i = k = 0; i < points1.size(); i++ )
+            {
+                circle( img, points1[i], 3, Scalar(128,128,0), -1, 8);
+            }
+	    size = writeToArray(points1, (char *)pointlist, outdatasize) ;
+	}
+#endif
+        for( i = 0; i < pointsg.size(); i++ )
+        {
+              circle( img, pointsg[i], 10, Scalar(128,128,0), 1, 8);
+        }
+	size = 0 ;
+	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
+	g_print("Stagen:return %d bytes\n",size) ;
+//imshow...	
+	return size;
+}
 int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 {
 	vector<uchar> status;
@@ -437,15 +478,16 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 	
 /** Main platform functions **/
 #define MAXSTAGEDATASIZE 16384
-int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb, GstBuffer **newdb)
+GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb)
 {
 	Mat img;
 	gboolean res  ;
 	char opdata[MAXSTAGEDATASIZE] ;
 	int size;
+	GstBuffer *newdb = NULL ;
 	if (frameToImg(vbuf,gcaps,&img,df) == false) {
 		printf("Something went wrong extracting image\n") ;
-		return -1 ;
+		return NULL ;
 	}
 	if (dbuf != NULL ) {
 		GstMemory *odmem = gst_buffer_get_all_memory(dbuf) ;
@@ -453,7 +495,7 @@ int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameDat
 		g_assert(odmem) ;
 		if (gst_memory_map(odmem, &odmap, GST_MAP_READ) != TRUE) {
 			g_print("Memory mapping for data buf failed!\n") ;
-			return -1 ;
+			return NULL ;
 		}
 		else 
 		{
@@ -466,7 +508,7 @@ int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameDat
 	else {
 		size = stage(img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
 	}
-	g_print("Stage 1 writes %d bytes\n",size) ;
+	g_print("Stage fn writes %d bytes\n",size) ;
 	
 	if (size > 0)
 	{
@@ -476,13 +518,13 @@ int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameDat
 		vmem = gst_buffer_get_all_memory(vbuf) ;
 		if (gst_memory_map(vmem, &vmap, GST_MAP_READ) != TRUE) {
 			g_print("Memory mapping for old video buf failed!\n") ;
-			return -1 ;
+			return NULL ;
 		}
-		*newdb = gst_buffer_new_allocate(NULL,getTagSize() + size,NULL) ;
-		dmem = gst_buffer_get_all_memory(*newdb) ;
+		newdb = gst_buffer_new_allocate(NULL,getTagSize() + size,NULL) ;
+		dmem = gst_buffer_get_all_memory(newdb) ;
 		if (gst_memory_map(dmem, &dmap, GST_MAP_READ) != TRUE) {
 			g_print("Memory mapping for new data buf failed!\n") ;
-			return -1 ;
+			return NULL ;
 		}
 		obuf = dmap.data ;
 		dcvTagBuffer(vmap.data,vmap.size,(void *)dmap.data,getTagSize()) ;
@@ -493,9 +535,9 @@ int dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameDat
 		gst_memory_unmap(vmem,&vmap) ;
 	}
 	else
-		*newdb = NULL ;
+		newdb = NULL ;
 	
 	/** Now convert img back to buffer **/
 	*newvb = cv::writeFrame(&img, df) ;
-	return size ;
+	return newdb ;
 }

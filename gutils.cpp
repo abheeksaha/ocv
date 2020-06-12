@@ -12,7 +12,7 @@
 bufferCounter_t inbc,outbc;
 extern gboolean terminate ;
 
-
+gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD) ;
 
 gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, unsigned int tms)
 {
@@ -271,7 +271,7 @@ void testStats(GstElement *tst)
 /** Sink and Source Handlers **/
 void eosRcvd(GstAppSink *slf, gpointer D)
 {
-	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	g_print("eosRcvd:Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
 	if (D) {
 	gboolean *eos = (gboolean *)D ;
 	*eos = TRUE ;
@@ -280,7 +280,7 @@ void eosRcvd(GstAppSink *slf, gpointer D)
 
 void eosRcvdSrc(GstAppSrc *slf, gpointer D)
 {
-	g_print("Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	g_print("eosRcvdSrc:Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
 	gboolean *eos = (gboolean *)D ;
 	*eos = TRUE ;
 }
@@ -310,31 +310,59 @@ GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 		return GST_FLOW_ERROR;
 }
 
+typedef struct {
+	dcv_bufq_t *pD ;
+	GstCaps * caps ;
+} dcv_bufq_loc_t  ;
+
 GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 {
 	int cnt=0;
+	dcv_bufq_loc_t ld ;
+	ld.pD = (dcv_bufq_t *)d ;
+
 	if (d == NULL) {
 		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK;
 	}
 
-	dcv_bufq_t *D = (dcv_bufq_t *)d ;
 	GstSample *gsm ;
 	if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
+		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),ld.pD->lastData.tv_sec, ld.pD->lastData.tv_usec,g_queue_get_length(ld.pD->bufq)) ;
+		ld.caps = gst_sample_get_caps(gsm) ;
 		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
-		GstBuffer *gb = gst_sample_get_buffer(gsm);
-		dcv_BufContainer_t *bcnt = malloc(sizeof(dcv_BufContainer_t)) ;
-		bcnt->nb = gst_buffer_copy_deep(gb) ;
-		bcnt->caps = gst_sample_get_caps(gsm) ;
-		gst_buffer_ref(bcnt->nb) ;
-		gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
-		g_queue_push_tail(D->bufq,bcnt) ;
-		gettimeofday(&D->lastData,&D->tz) ;
-		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),D->lastData.tv_sec, D->lastData.tv_usec,g_queue_get_length(D->bufq)) ;
-		return GST_FLOW_OK;
+		if (glb != NULL) {
+			if (gst_buffer_list_foreach(glb,sink_pushbufferToQueue,(gpointer)&ld) == TRUE)
+				return GST_FLOW_OK;
+			else 
+				return GST_FLOW_ERROR;
+		}
+		else 
+		{
+			GstBuffer *gb = gst_sample_get_buffer(gsm) ;
+			if (sink_pushbufferToQueue(gb,(gpointer) &ld) == TRUE)
+				return GST_FLOW_OK;
+			else
+				return GST_FLOW_ERROR ;
+		}
 	}
 	else
 		return GST_FLOW_ERROR ;
+}
+gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD)
+{
+	dcv_bufq_loc_t *D = (dcv_bufq_loc_t *)pD ;
+	dcv_BufContainer_t *bcnt = malloc(sizeof(dcv_BufContainer_t)) ;
+	//bcnt->nb = gst_buffer_copy_deep(gb) ;
+	bcnt->nb = gb ;
+	bcnt->caps = D->caps ;
+	gst_buffer_ref(bcnt->nb) ;
+	gettimeofday(&bcnt->ctime,&bcnt->ctz) ;
+	g_queue_push_tail(D->pD->bufq,bcnt) ;
+	gettimeofday(&D->pD->lastData,&D->pD->tz) ;
+	D->pD->entries++ ;
+	g_print("Added buffer number %d to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),D->pD->entries) ;
+	return true;
 }
 
 void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
@@ -428,6 +456,15 @@ gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_sa
 	return TRUE;
 }
 
+void dcvAppSrcStatus(GstAppSrc *s, srcstate_t *st)
+{
+	g_print("%s: state:%s length=%d finished=%s\n",
+			GST_ELEMENT_NAME(s),
+			st->state == G_WAITING? "Waiting":"Blocked",
+			st->length,
+			st->finished==true ? "true":"false") ;
+}
+
 int dcvLocalDisplay(GstBuffer *gb, GstCaps *vcaps, GstAppSrc *vdisp, int num_frames)
 {
 	GstSample *smp ;
@@ -445,10 +482,16 @@ int dcvLocalDisplay(GstBuffer *gb, GstCaps *vcaps, GstAppSrc *vdisp, int num_fra
 		}
 		else
 		{
-			g_print("Pushed video frame to display (%d)\n",num_frames+1) ;
+			g_print("Pushed video frame to display (%d)\n",num_frames) ;
 			rval = 1 ;
 		}
 		gst_sample_unref(smp) ;
 		return rval ;
 	}
+}
+
+int dcvBufQInit(dcv_bufq_t *P)
+{
+	P->bufq = g_queue_new() ;
+	P->entries = 0;
 }
