@@ -138,10 +138,11 @@ int main( int argc, char** argv )
 			int dbgFlags = 0 ;
 			g_print("dbug on...") ; 
 			if (optarg) { 
-				g_print("optarg=%s\n") ; dbgFlags = atoi(optarg) ;
+				g_print("optarg=%s\n",optarg) ; dbgFlags = atoi(optarg) ;
 			}
 			else { g_print("\n") ; dbgFlags = DBG_DEFAULT ;  }
 			dcvFtcDebug = (dbgFlags & DBG_FTC_MASK) ;
+			g_print("DcvFtcDebug is set to %d\n",dcvFtcDebug) ;
 		}
 		else if (ch == 'i') { strcpy(ipaddress,optarg) ; }
 		else if (ch == 'p') { txport = atoi(optarg) ; }
@@ -337,31 +338,7 @@ int main( int argc, char** argv )
 			dcv_BufContainer_t *dataFrameContainer;
 			struct timeval nowTime ;
 			struct timezone nz;
-			if (D.usrcstate.state == G_WAITING) {
-				int bpushed ;
-				if (D.usrcstate.finished != TRUE) {
-					bpushed = dcvPushBytes(D.usrc,D.ftc,&D.usrcstate.finished) ;
-					if (dcvFtcDebug & 0x10)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
-					if (D.usrcstate.finished == TRUE) {
-						g_print("End of stream achieved\n") ;
-					}
-				}
-				else { /** Connection closed from sender side, try and clear out the packets **/
-					bpushed = dcvPushBuffered(D.usrc,D.ftc) ;
-					if (dcvFtcDebug & 0x10)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
-					if (D.ftc->totalbytes == D.ftc->spaceleft) {
-						if (D.eosSent[EOS_USRC] == false) {
-							g_print("End of TCP stream and no buffered bytes left\n") ;
-							gst_app_src_end_of_stream(D.usrc) ;
-							D.eosSent[EOS_USRC] = true ;
-						}
-					}
-				}
-				while (dcvIsDataBuffered(D.ftc) & D.usrcstate.state == G_WAITING) {
-					if (dcvFtcDebug) g_print("%d bytes pending after end of cycle (state=%d)\n",dcvBufferedBytes(D.ftc),D.usrcstate.state) ; 
-					if (dcvPushBuffered(D.usrc,D.ftc)  <= 0) break ;
-				}
-			}
+			int bpushed ;
 			while (!g_queue_is_empty(D.videoframequeue.bufq) && (grcvrMode == GRCVR_FIRST || !g_queue_is_empty(D.olddataqueue.bufq))) 
 			{
 				int stay=0;
@@ -410,8 +387,6 @@ GRCVR_PROCESS:
 					if (localdisplay == TRUE) 
 						if (dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,Dv.num_frames) != -1) Dv.num_frames++ ;
 					g_print("State of video queue:%d\n",g_queue_get_length(D.videoframequeue.bufq)) ;
-					dcvFtConnStatus(D.ftc,D.eos[EOS_USRC],D.eos[EOS_USINK], D.eosSent[EOS_USINK]) ;
-					dcvAppSrcStatus(D.usrc,&D.usrcstate) ;
 					
 
 					if (grcvrMode == GRCVR_INTERMEDIATE) 
@@ -428,6 +403,36 @@ GRCVR_PROCESS:
 					gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
 				}
 				/** Clean up the video frame queue **/
+				dcvFtConnStatus(D.ftc,D.eos[EOS_USRC],D.eos[EOS_USINK], D.eosSent[EOS_USINK]) ;
+				dcvAppSrcStatus(D.usrc,&D.usrcstate) ;
+			}
+			if (D.usrcstate.state == G_WAITING) {
+				if (D.usrcstate.finished != TRUE) {
+					bpushed = dcvPullBytesFromNet(D.usrc,D.ftc,&D.usrcstate.finished) ;
+					if (dcvFtcDebug & 0x03)g_print("dcvPullBytesFromNet:Pulled %d bytes\n",bpushed ) ;
+					if (D.usrcstate.finished == TRUE) {
+						g_print("End of stream achieved\n") ;
+					}
+				}
+				else { /** Connection closed from sender side, try and clear out the packets **/
+					bpushed = dcvPushBuffered(D.usrc,D.ftc) ;
+					if (dcvFtcDebug & 0x03)g_print("dcvPushbuffered:Pushed %d bytes\n",bpushed ) ;
+					if (D.ftc->totalbytes == D.ftc->spaceleft) {
+						if (D.eosSent[EOS_USRC] == false) {
+							g_print("End of TCP stream and no buffered bytes left\n") ;
+							gst_app_src_end_of_stream(D.usrc) ;
+							D.eosSent[EOS_USRC] = true ;
+						}
+					}
+				}
+			}
+			while (dcvIsDataBuffered(D.ftc) & D.usrcstate.state == G_WAITING) {
+				if (dcvFtcDebug) g_print("%d bytes pending after end of cycle (state=%d)\n",dcvBufferedBytes(D.ftc),D.usrcstate.state) ; 
+				if (dcvPushBuffered(D.usrc,D.ftc)  <= 0) {
+					if (dcvFtcDebug) g_print("dcv Push Buffered has run out of space vq=%d dq=%d\n",
+							g_queue_get_length(D.videoframequeue.bufq),g_queue_get_length(D.olddataqueue.bufq)) ; 
+					break ;
+				}
 			}
 			while (dcvIsDataBuffered(D.ftc)) {
 				if (dcvFtcDebug) g_print("Pending data in input buffer! %d bytes\n",dcvBufferedBytes(D.ftc)) ;
@@ -435,12 +440,15 @@ GRCVR_PROCESS:
 			}
 			if (dcvIsDataBuffered(D.ftc)) { 
 				if (dcvFtcDebug) g_print("%d bytes pending after end of cycle (state=%d)\n",dcvBufferedBytes(D.ftc),D.usrcstate.state) ; 
+				continue ;
 			}
-			dcvFtcDebug=0 ;
+			
+			if (grcvrMode == GRCVR_INTERMEDIATE && D.dsrcstate.state != G_WAITING) continue ;
+			else if (D.usrcstate.state != G_WAITING) continue ;
 			if (g_queue_is_empty(D.videoframequeue.bufq) && D.eos[EOS_VSINK]) {
 				if (D.eosSent[EOS_VSINK] == false ) {
 				g_print("End of video stream\n") ;
-				D.eosSent[EOS_DSINK]=true ;
+				D.eosSent[EOS_VSINK]=true ;
 				}
 			}
 			if (g_queue_is_empty(D.olddataqueue.bufq) && D.eos[EOS_DSINK]) {
@@ -449,7 +457,7 @@ GRCVR_PROCESS:
 				D.eosSent[EOS_DSINK]=true ;
 				}
 			}
-			if ( (D.eosSent[EOS_DSRC] || D.eosSent[EOS_VDISP] ) &&
+			if ( (D.eosSent[EOS_DSINK] || D.eosSent[EOS_VSINK] ) &&
 					g_queue_is_empty(D.videoframequeue.bufq) &&
 					g_queue_is_empty(D.olddataqueue.bufq))
 			{

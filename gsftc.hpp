@@ -32,7 +32,7 @@ typedef struct {
 gboolean dcvFtConnStart(dcv_ftc_t *D) ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport) ;
 int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D) ;
-int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished) ;
+int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished) ;
 void dcvFtConnStatus(dcv_ftc_t *D,gboolean eosUsrc, gboolean eosUsink, gboolean eosSentUsink) ;
 void dcvFtConnClose(dcv_ftc_t *D) ;
 void dcvEosRcvd(GstAppSink *slf, gpointer d) ;

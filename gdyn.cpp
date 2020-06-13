@@ -310,7 +310,8 @@ int main( int argc, char** argv )
 				g_print("Got pending data:%d\n", dcvBufferedBytes(D.ftc)) ;
 			}
 			g_print("Received eos on vsink... and all clear\n") ;
-			if (D.eos[EOS_USRC] == false && D.eosSent[EOS_USRC] == false) 
+			if (D.dsrcstate.state != G_WAITING) continue ;
+			else if (D.eos[EOS_USRC] == false && D.eosSent[EOS_USRC] == false)
 			{
 				gst_app_src_end_of_stream(D.dsrc) ;
 				D.eosSent[EOS_USRC] = true ;

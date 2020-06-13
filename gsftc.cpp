@@ -146,14 +146,16 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 
 	pfh = (unsigned int *)D->obuf ;
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
+	guint64 avlbytes = dcvBufferedBytes(D) ;
 	if (maxbytes == 0) return maxbytes;
+	if (avlbytes < SIZEOFFRAMEHDR) return -1 ;
 	bsize = pfh[SZOFFSET] ;
-	if (dcvFtcDebug & 0x10) 
-		g_print("dcvPushBuffered:Bsize=%d Time=%d.%d sequence=%d maxbytes=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET], maxbytes) ;
+	if (dcvFtcDebug & 0x03) 
+		g_print("dcvPushBuffered:Bsize=%d Time=%d.%d sequence=%d maxbytes=%d availbytes=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET], maxbytes, avlbytes) ;
 	if ( bsize   > maxbytes) { return 0; }
 	if ( bsize >  (D->totalbytes - D->spaceleft)) { return -1; }
 	if (pfh[UWOFFSET] != uw) donothing() ;
-	if (D->seqExpected != -1) { 
+	if (D->seqExpected != -1) {
 		g_assert(pfh[SEQOFFSET] == D->seqExpected) ;
 		D->seqExpected++ ;
 	}
@@ -170,6 +172,9 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 		GST_ERROR("Ran out of buffers in the pool!\n") ; 
 		g_assert(gb) ;
 	}
+	if (dcvFtcDebug & 0x03) 
+		g_print("dcvPushBuffered:Constructed buffer\n") ;
+	if ( bsize   > maxbytes) { return 0; }
 	GstMemory *bmem;
 	GstMapInfo bmap;
 	bmem = gst_buffer_get_all_memory(gb) ;
@@ -197,55 +202,57 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 	else
 		memset(D->obuf,0,D->totalbytes) ;
 	D->pbuf = &D->obuf[D->totalbytes - D->spaceleft] ;
-	if(dcvFtcDebug & 0x10) g_print("dcvPushBuffered:Reclaimed %d bytes, spaceleft=%d\n",SIZEOFFRAMEHDR+bsize,D->spaceleft) ;
+	if(dcvFtcDebug & 0x03) g_print("dcvPushBuffered:Reclaimed %d bytes, spaceleft=%d\n",SIZEOFFRAMEHDR+bsize,D->spaceleft) ;
 	return (bsize) ;
 }
-int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
+int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 {
 	int nbytes,tbytes=0 ;
 	gboolean forceflush=TRUE ;
+	int flags = MSG_DONTWAIT ;
+	if (dcvIsDataBuffered(D)) flags = MSG_DONTWAIT ;
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
-	if (dcvFtcDebug & 0x10) g_print("dcvPushBytes: Starting with maxbytes=%u, space avail=%u\n",maxbytes,D->spaceleft) ;
+	if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Starting with maxbytes=%u, space avail=%u pfinished=%d\n",maxbytes,D->spaceleft,*pfinished) ;
 	while (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
 		while ( D->spaceleft > 0 && *pfinished == FALSE) {
-			nbytes = recv(D->insock,D->pbuf,D->spaceleft,MSG_DONTWAIT) ;
+			nbytes = recv(D->insock,D->pbuf,D->spaceleft,flags) ;
 		/** See how much space there is in the array **/
-			if (nbytes == -1) {
-				return 0 ;
-			}
-			else if (nbytes == 0) {
+			if (nbytes == 0) {
 				if (dcvFtcDebug) g_print("Connection closed!\n") ;
 				forceflush = TRUE ;
 				*pfinished = TRUE ;
 			}
-			else {
+			else if (nbytes != -1){
 				tbytes += nbytes ;
 				D->pbuf += nbytes;
 				D->spaceleft -= nbytes ;
-				if (dcvFtcDebug & 0x10) g_print("dcvPushBytes: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
+				if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
+				if (maxbytes > 0) break ;
 			}
 		}
-		while (maxbytes > 0)
+		if (maxbytes > 0)
 		{
-			if (dcvFtcDebug & 0x10) g_print("dcvPushBytes: Trying to push %d bytes\n",maxbytes) ;
+			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Trying to push %d bytes\n",maxbytes) ;
 			int pushedbytes = dcvPushBuffered(slf,D) ;
-			if (dcvFtcDebug & 0x10) g_print("dcvPushBytes: Pushed %d bytes\n",pushedbytes) ;
+			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Pushed %d bytes\n",pushedbytes) ;
 			if (pushedbytes == 0) {
-				return tbytes ;
+				return (tbytes > 0 ? -tbytes:-1) ;
 			}
 			else if (pushedbytes == -1) {
 			/** More data required **/
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 				if (*pfinished == TRUE) return tbytes ;
-				else break ;
+				else {
+				       flags = 0;
+				}
 			}
 			else
 			{
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 				tbytes += pushedbytes ;
+				return tbytes ;
 			}
 		}
-		if (nbytes == -1) break ;
 	}
 	return tbytes ;
 }
@@ -281,14 +288,14 @@ GstFlowReturn dcvAppSinkNewSample(GstAppSink *slf, gpointer d)
 	dcv_ftc_t *D = (dcv_ftc_t *)d ;
 	static int samples=0;
 	if (d == NULL) {
-		if (dcvFtcDebug) g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		if (dcvFtcDebug & 0x07) g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK;
 	}
 
 	g_mutex_lock(&D->lock) ;
 	GstSample *gsm ;
 	samples++ ;
-	if (dcvFtcDebug) g_print("New sample in %s: totalbytes:%d spaceleft=%d samples=%d\n",GST_ELEMENT_NAME(slf), D->totalbytes, D->spaceleft,samples) ;
+	if (dcvFtcDebug & 0x03) g_print("New sample in %s: totalbytes:%d spaceleft=%d samples=%d\n",GST_ELEMENT_NAME(slf), D->totalbytes, D->spaceleft,samples) ;
 	if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
 		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
 		if (glb != NULL) {
@@ -339,7 +346,7 @@ gboolean dcvSendBuffer (GstBuffer *b, gpointer d)
 	pfh[TMOFFSET] = tv.tv_usec & 0xffff ;
 	pfh[TMOFFSET] |= (tv.tv_sec & 0xffff) << 16 ;
 	pfh[SZOFFSET] = (unsigned int)bmap.size;
-	if (dcvFtcDebug & 0x10) g_print("dcvSendBuffer:Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;
+	if (dcvFtcDebug & 0x03) g_print("dcvSendBuffer:Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;
 	if ( send(D->outsock,framehead,SIZEOFFRAMEHDR, MSG_MORE) == -1) {
 		return FALSE ;	
 	}
