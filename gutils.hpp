@@ -4,6 +4,16 @@
 #include <sys/time.h>
 #define validstate(k) ((k>=0) && (k<=4))
 
+
+typedef enum {
+	EOS_VSINK,
+	EOS_DSINK,
+	EOS_USINK,
+	EOS_VDISP,
+	EOS_USRC,
+	EOS_DSRC,
+	MAX_EOS_TYPES
+} eos_e ;
 GST_DEBUG_CATEGORY_STATIC (my_category);
 #define GST_CAT_DEFAULT my_category
 

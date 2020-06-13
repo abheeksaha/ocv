@@ -361,7 +361,7 @@ gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD)
 	g_queue_push_tail(D->pD->bufq,bcnt) ;
 	gettimeofday(&D->pD->lastData,&D->pD->tz) ;
 	D->pD->entries++ ;
-	g_print("Added buffer number %d to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),D->pD->entries) ;
+	g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
 	return true;
 }
 
@@ -378,8 +378,8 @@ void dataFrameStop(GstAppSrc *s, gpointer data)
 {
 	srcstate_t *pD = (srcstate_t *)data ;
 	if (pD->state != G_BLOCKED) {
-	g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
-	pD->state = G_BLOCKED;
+		g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
+		pD->state = G_BLOCKED;
 	}
 }
 
@@ -495,3 +495,4 @@ int dcvBufQInit(dcv_bufq_t *P)
 	P->bufq = g_queue_new() ;
 	P->entries = 0;
 }
+

@@ -24,6 +24,8 @@ static void help(char *name)
 	exit(1) ;
 }
 
+#define DBG_FTC_MASK 0x0003
+#define DBG_DEFAULT 0x0101
 GstPadProbeReturn cb_have_data (GstPad  *pad, GstPadProbeInfo *info, gpointer user_data) ;
 typedef struct {
 	GstElement *pipeline;
@@ -39,11 +41,8 @@ typedef struct {
 	/* Output elements **/
 	srcstate_t usrcstate;
 	srcstate_t dsrcstate;
-	gboolean deos;
-	gboolean deosSent;
-	gboolean eosDsrc;
-	gboolean veos;
-	gboolean veosSent;
+	gboolean eos[MAX_EOS_TYPES];
+	gboolean eosSent[MAX_EOS_TYPES];
 	/** Data holding elements **/
 	dcv_bufq_t dataqueue;
 	dcv_bufq_t olddataqueue;
@@ -65,7 +64,7 @@ gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static char termdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
+rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! vp9dec name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
 appsrc name=vdisp ! queue ! video/x-raw,height=480,width=848,format=BGR ! autovideosink";
 
@@ -73,8 +72,8 @@ static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! queue name=q1 ! rtpvp9depay name=vp9d ! tee name=tpoint \
 rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! appsink name=dsink \
-tpoint.src_0 ! queue name=q3 ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
-rtpmux name=mux ! queue name=q4 !  appsink name=usink \
+tpoint.src_0 ! queue name=q3 ! vp9dec name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+rtpmux name=mux !  queue ! appsink name=usink \
 appsrc name=vdisp ! queue name=q5 ! video/x-raw,height=480,width=848,format=BGR ! fakesink \
 tpoint.src_1 ! queue name=q6 ! rtpvp9pay ! mux.sink_0 \
 appsrc name=dsrc ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
@@ -86,7 +85,7 @@ typedef enum {
 } grcvr_mode_e ;
 
 extern bufferCounter_t inbc,outbc;
-int dcvDebug=0;
+int dcvFtcDebug=0;
 int main( int argc, char** argv )
 {
 
@@ -115,7 +114,7 @@ int main( int argc, char** argv )
 	static struct option longOpts[] = {
 		{ "mode", required_argument, 0, 11 },
 		{ "help", no_argument, 0, 'h' },
-		{ "dcvDebug", optional_argument, 0, 12 },
+		{ "debug", optional_argument, 0, 12 },
 		{ "recvport", required_argument, 0, 'r' },
 		{ "sendport", required_argument, 0, 'p' },
 		{ "sendaddr", required_argument, 0, 'i' },
@@ -136,9 +135,13 @@ int main( int argc, char** argv )
 			else if (strncmp(optarg,"first",5) == 0) { grcvrMode = GRCVR_FIRST ; }
 		}
 		else if (ch == 12) { 
-			g_print("dcvDebug on...") ; 
-			if (optarg) { g_print("optarg=%s\n") ; dcvDebug = atoi(optarg) ;}
-			else {dcvDebug = 1 ; g_print("\n") ; }
+			int dbgFlags = 0 ;
+			g_print("dbug on...") ; 
+			if (optarg) { 
+				g_print("optarg=%s\n") ; dbgFlags = atoi(optarg) ;
+			}
+			else { g_print("\n") ; dbgFlags = DBG_DEFAULT ;  }
+			dcvFtcDebug = (dbgFlags & DBG_FTC_MASK) ;
 		}
 		else if (ch == 'i') { strcpy(ipaddress,optarg) ; }
 		else if (ch == 'p') { txport = atoi(optarg) ; }
@@ -146,7 +149,6 @@ int main( int argc, char** argv )
 	}
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
-	//bufferCounterInit(&inbc,&outbc) ;
 	if (grcvrMode == GRCVR_INTERMEDIATE) srcdesc = relaydesc ;
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc ;
@@ -160,11 +162,11 @@ int main( int argc, char** argv )
 	dcvBufQInit(&D.dataqueue) ;
 	dcvBufQInit(&D.olddataqueue) ;
 	dcvBufQInit(&D.videoframequeue) ;
-	D.deos = FALSE ;
-	D.veos = FALSE ;
-	D.deosSent = FALSE ;
-	D.veosSent = FALSE ;
-	D.eosDsrc = FALSE;
+	for (int i = 0; i<MAX_EOS_TYPES; i++)
+	{
+		D.eos[i] = FALSE ;
+		D.eosSent[i] = FALSE ;
+	}
 	D.usrcstate.state = G_BLOCKED;
 	D.usrcstate.length = 0;
 	D.usrcstate.finished = FALSE ;
@@ -197,8 +199,8 @@ int main( int argc, char** argv )
 	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.dsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsink")) ;
-	dcvConfigAppSink(D.vsink,sink_newsample, &D.videoframequeue, sink_newpreroll, &D.videoframequeue,eosRcvd, &D.veos) ; 
-	dcvConfigAppSink(D.dsink,sink_newsample, &D.olddataqueue, sink_newpreroll, &D.olddataqueue,eosRcvd, &D.deos) ; 
+	dcvConfigAppSink(D.vsink,sink_newsample, &D.videoframequeue, sink_newpreroll, &D.videoframequeue,eosRcvd, &D.eos[EOS_VSINK]) ; 
+	dcvConfigAppSink(D.dsink,sink_newsample, &D.olddataqueue, sink_newpreroll, &D.olddataqueue,eosRcvd, &D.eos[EOS_DSINK]) ; 
 	if (grcvrMode == GRCVR_INTERMEDIATE) {
 		D.usink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"usink")) ;
 		dcvConfigAppSink(D.usink,dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,dcvEosRcvd, &D.ftc) ; 
@@ -256,7 +258,7 @@ int main( int argc, char** argv )
 			GstCaps *srccaps = gst_caps_new_simple (
 				"application/x-rtp", 
 				NULL ) ;
-			dcvConfigAppSrc(D.usrc,dataFrameWrite,&D.usrcstate, dataFrameStop,&D.usrcstate, eosRcvdSrc,&D.ftc->eosIn,srccaps) ;
+			dcvConfigAppSrc(D.usrc,dataFrameWrite,&D.usrcstate, dataFrameStop,&D.usrcstate, eosRcvdSrc,&D.eos[EOS_USRC],srccaps) ;
 			g_object_set(G_OBJECT(D.usrc), "is-live", TRUE,NULL) ;
 			g_object_set(G_OBJECT(D.usrc), "do-timestamp", TRUE,NULL) ;
 //			dcvAttachBufferCounterIn(GST_ELEMENT_CAST(D.usrc),&inbc) ;
@@ -268,7 +270,7 @@ int main( int argc, char** argv )
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
 		  	GstCaps *caps = gst_caps_new_simple ("application/x-rtp",
 		  		"media",G_TYPE_STRING,"application","clock-rate",G_TYPE_INT,90000,"payload",G_TYPE_INT,102,"encoding-name",G_TYPE_STRING,"X-GST",NULL) ;
-			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate, eosRcvdSrc, &D.eosDsrc,caps) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate, eosRcvdSrc, &D.eos[EOS_DSRC],caps) ;
 			g_object_set(G_OBJECT(D.dsrc), "is-live", TRUE,NULL) ;
 		}
 		{
@@ -337,31 +339,28 @@ int main( int argc, char** argv )
 			struct timezone nz;
 			if (D.usrcstate.state == G_WAITING) {
 				int bpushed ;
-				dcvDebug = 3 ;
 				if (D.usrcstate.finished != TRUE) {
 					bpushed = dcvPushBytes(D.usrc,D.ftc,&D.usrcstate.finished) ;
-					if (dcvDebug & 0x10)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
+					if (dcvFtcDebug & 0x10)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
 					if (D.usrcstate.finished == TRUE) {
 						g_print("End of stream achieved\n") ;
 					}
 				}
 				else { /** Connection closed from sender side, try and clear out the packets **/
 					bpushed = dcvPushBuffered(D.usrc,D.ftc) ;
-					if (dcvDebug & 0x10)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
+					if (dcvFtcDebug & 0x10)g_print("dcvPushBytes:Pushed %d bytes\n",bpushed ) ;
 					if (D.ftc->totalbytes == D.ftc->spaceleft) {
-						if (D.ftc->eosSent == false) {
+						if (D.eosSent[EOS_USRC] == false) {
 							g_print("End of TCP stream and no buffered bytes left\n") ;
-//							gst_app_src_end_of_stream(D.usrc) ;
-							D.ftc->eosSent = true ;
+							gst_app_src_end_of_stream(D.usrc) ;
+							D.eosSent[EOS_USRC] = true ;
 						}
 					}
 				}
-				dcvDebug = 1 ;
-
-			}
-			while (D.ftc->totalbytes > D.ftc->spaceleft) {
-				g_print("Pending data in input buffer! %d bytes\n",D.ftc->totalbytes - D.ftc->spaceleft) ;
-				if (dcvPushBuffered(D.usrc,D.ftc)  <= 0) break ;
+				while (dcvIsDataBuffered(D.ftc) & D.usrcstate.state == G_WAITING) {
+					if (dcvFtcDebug) g_print("%d bytes pending after end of cycle (state=%d)\n",dcvBufferedBytes(D.ftc),D.usrcstate.state) ; 
+					if (dcvPushBuffered(D.usrc,D.ftc)  <= 0) break ;
+				}
 			}
 			while (!g_queue_is_empty(D.videoframequeue.bufq) && (grcvrMode == GRCVR_FIRST || !g_queue_is_empty(D.olddataqueue.bufq))) 
 			{
@@ -411,20 +410,18 @@ GRCVR_PROCESS:
 					if (localdisplay == TRUE) 
 						if (dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,Dv.num_frames) != -1) Dv.num_frames++ ;
 					g_print("State of video queue:%d\n",g_queue_get_length(D.videoframequeue.bufq)) ;
-					dcvFtConnStatus(D.ftc) ;
+					dcvFtConnStatus(D.ftc,D.eos[EOS_USRC],D.eos[EOS_USINK], D.eosSent[EOS_USINK]) ;
 					dcvAppSrcStatus(D.usrc,&D.usrcstate) ;
 					
 
 					if (grcvrMode == GRCVR_INTERMEDIATE) 
 					{
 						newDataFrame = gst_buffer_copy(dataFrameWaiting) ;
-//						GstSample *gsample = gst_sample_new(newDataFrame, dataFrameContainer->caps,NULL,NULL) ;
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,newDataFrame) ;
 						g_print("Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
 								ret,++vbufsnt,
 								g_queue_get_length(D.videoframequeue.bufq),
 								g_queue_get_length(D.olddataqueue.bufq)) ;
-//						gst_sample_unref(gsample) ;
 					}
 					gst_buffer_unref(GST_BUFFER_CAST(videoFrameWaiting));
 					gst_caps_unref(vcaps);
@@ -432,25 +429,33 @@ GRCVR_PROCESS:
 				}
 				/** Clean up the video frame queue **/
 			}
-			if (g_queue_is_empty(D.videoframequeue.bufq) && D.veos) {
-				if (D.veosSent == false) {
-					g_print("End of video stream\n") ;
-					gst_app_src_end_of_stream(D.vdisp) ;
-					D.veosSent = true ;
+			while (dcvIsDataBuffered(D.ftc)) {
+				if (dcvFtcDebug) g_print("Pending data in input buffer! %d bytes\n",dcvBufferedBytes(D.ftc)) ;
+				if (dcvPushBuffered(D.usrc,D.ftc)  <= 0) break ;
+			}
+			if (dcvIsDataBuffered(D.ftc)) { 
+				if (dcvFtcDebug) g_print("%d bytes pending after end of cycle (state=%d)\n",dcvBufferedBytes(D.ftc),D.usrcstate.state) ; 
+			}
+			dcvFtcDebug=0 ;
+			if (g_queue_is_empty(D.videoframequeue.bufq) && D.eos[EOS_VSINK]) {
+				if (D.eosSent[EOS_VSINK] == false ) {
+				g_print("End of video stream\n") ;
+				D.eosSent[EOS_DSINK]=true ;
 				}
 			}
-			if (g_queue_is_empty(D.olddataqueue.bufq) && D.deos) {
-				if (D.deosSent == false) {
-					g_print("End of data stream\n") ;
-					gst_app_src_end_of_stream(D.dsrc) ;
-					D.deosSent = true ;
+			if (g_queue_is_empty(D.olddataqueue.bufq) && D.eos[EOS_DSINK]) {
+				if (D.eosSent[EOS_DSINK] == false ) {
+				g_print("End of data stream\n") ;
+				D.eosSent[EOS_DSINK]=true ;
 				}
 			}
-			if (D.veosSent && D.deosSent )
+			if ( (D.eosSent[EOS_DSRC] || D.eosSent[EOS_VDISP] ) &&
+					g_queue_is_empty(D.videoframequeue.bufq) &&
+					g_queue_is_empty(D.olddataqueue.bufq))
 			{
-				g_print("Everything cleared up, exiting\n") ;
-				terminate = TRUE ;
-				dcvFtConnClose(D.ftc) ;
+					g_print("Everything cleared up, exiting\n") ;
+					terminate = TRUE ;
+					dcvFtConnClose(D.ftc) ;
 			}
 		}
 	} while (terminate == FALSE) ;

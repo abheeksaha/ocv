@@ -25,18 +25,15 @@ typedef struct {
 	int servsock;
 	int sequence ;
 	int seqExpected;
-	gboolean eosOut;
-	gboolean eosIn;
 	GstClock *pclk ;
 	GMutex lock ;
-	gboolean eosSent;
 }dcv_ftc_t ;
 
 gboolean dcvFtConnStart(dcv_ftc_t *D) ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport) ;
 int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D) ;
 int dcvPushBytes(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished) ;
-void dcvFtConnStatus(dcv_ftc_t *D) ;
+void dcvFtConnStatus(dcv_ftc_t *D,gboolean eosUsrc, gboolean eosUsink, gboolean eosSentUsink) ;
 void dcvFtConnClose(dcv_ftc_t *D) ;
 void dcvEosRcvd(GstAppSink *slf, gpointer d) ;
 
@@ -46,4 +43,6 @@ void dcvAppSrcFrameWrite(GstAppSrc *slf, guint length, gpointer d) ;
 void dcvAppSrcFrameStop(GstAppSrc *slf, gpointer d ) ;
 GstFlowReturn dcvAppSinkNewPreroll(GstAppSink *slf, gpointer d) ;
 GstFlowReturn dcvAppSinkNewSample(GstAppSink *slf, gpointer d) ;
+gboolean dcvIsDataBuffered(dcv_ftc_t *P) ;
+int dcvBufferedBytes(dcv_ftc_t *P) ;
 #endif

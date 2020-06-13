@@ -29,16 +29,15 @@ typedef struct {
 	GstElement *op;
 	GstElement *vp9d;
 	srcstate_t dsrcstate;
-	gboolean eos;
-	gboolean eosDsrc ;
-	gboolean eosVdisp;
+	gboolean eos[MAX_EOS_TYPES];
+	gboolean eosSent[MAX_EOS_TYPES];
 	GstElement *fsrc ;
 	unsigned long vsinkq;
 	dcv_bufq_t dq;
 	dcv_ftc_t *ftc;
 } dpipe_t ;
 
-int dcvDebug=0;
+int dcvFtcDebug=0;
 #include <getopt.h>
 #include "gutils.hpp"
 #include "rseq.hpp"
@@ -50,7 +49,7 @@ volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
 static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink name=usink \
-			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale !  queue ! appsink name=vsink \
+			  tpoint.src_0 ! queue ! vp9dec name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
@@ -128,8 +127,11 @@ int main( int argc, char** argv )
 	D.vp9d  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vp9d") ;
 	if (inputfromnet == FALSE) D.mdmx  = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
 	else D.mdmx = NULL ;
-	D.eos = FALSE ;
-	D.eosDsrc = D.eosVdisp = FALSE ;
+	for ( int i=0; i<MAX_EOS_TYPES; i++)
+	{
+		D.eos[i] = FALSE ;
+		D.eosSent[i] = FALSE ;
+	}
 	D.vsinkq=0 ;
 	dcvBufQInit(&D.dq) ;
 	D.dsrcstate.state = G_BLOCKED;
@@ -155,7 +157,7 @@ int main( int argc, char** argv )
 			g_print("Something went wrong in initialization\n") ;
 			exit(3) ;
 		}
-		dcvConfigAppSink(GST_APP_SINK_CAST(D.usink),dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, &D.ftc->eosOut) ; 
+		dcvConfigAppSink(GST_APP_SINK_CAST(D.usink),dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, &D.eos[EOS_USINK]) ; 
 	}
 	{
 		g_object_set(G_OBJECT(D.tpt), "pull-mode", GST_TEE_PULL_MODE_SINGLE, NULL) ;
@@ -187,7 +189,7 @@ int main( int argc, char** argv )
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
 		  	GstCaps *caps = gst_caps_new_simple ("application/x-rtp",
 		  		"media",G_TYPE_STRING,"application","clock-rate",G_TYPE_INT,90000,"payload",G_TYPE_INT,102,"encoding-name",G_TYPE_STRING,"X-GST",NULL) ;
-			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eosDsrc,caps) ;
+			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eos[EOS_DSRC],caps) ;
 		}
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 
@@ -196,7 +198,7 @@ int main( int argc, char** argv )
 			D.vdisp = GST_APP_SRC_CAST(gst_bin_get_by_name( GST_BIN(D.pipeline), "vdisp")) ;
 			g_assert(D.vdisp) ;
 			GstCaps *srccaps = gst_caps_new_simple ( "video/x-raw", NULL ) ;
-		 	dcvConfigAppSrc(D.vdisp, NULL , NULL, NULL , NULL, eosRcvdSrc, &D.eosVdisp,srccaps) ;
+		 	dcvConfigAppSrc(D.vdisp, NULL , NULL, NULL , NULL, eosRcvdSrc, &D.eos[EOS_VDISP],srccaps) ;
 		}
 	}
 	
@@ -287,29 +289,38 @@ int main( int argc, char** argv )
 					{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 						g_print("Pushing data buffer number %d...(ret=%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
-								++numDataFrames, ret,g_queue_get_length(D.dq.bufq),D.eosDsrc, D.ftc->eosOut, D.eosVdisp, D.eos) ;
+								++numDataFrames, ret,g_queue_get_length(D.dq.bufq),D.eos[EOS_DSRC], D.eos[EOS_USINK], D.eos[EOS_VDISP], D.eos[EOS_VSINK]) ;
 					}
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
 					dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,++Dv.num_frames) ;
 				}
 			}
-		}
-		if ((D.eos == TRUE  && g_queue_is_empty(D.dq.bufq)) || terminate == TRUE) {
-			GstEvent *gevent = gst_event_new_eos() ;
-			GstPad *spad = gst_element_get_static_pad(GST_ELEMENT_CAST(D.dsrc),"src") ;
-			g_assert(spad) ;
-			if (gst_pad_push_event(spad,gevent) != TRUE) {
-				GST_ERROR("Sorry, couldn't push eos event, even though I am done\n") ;
+			while (D.ftc->totalbytes > D.ftc->spaceleft) {
+				if (dcvFtcDebug) g_print("Pending data in input buffer! %d bytes\n",D.ftc->totalbytes - D.ftc->spaceleft) ;
+				if (dcvPushBuffered(GST_APP_SRC_CAST(D.fsrc),D.ftc)  <= 0) break ;
 			}
-			else gst_event_unref(gevent) ;
+			if (D.ftc->totalbytes > D.ftc->spaceleft) { 
+				if (dcvFtcDebug) g_print("%d bytes pending\n",(D.ftc->totalbytes - D.ftc->spaceleft)) ; 
+			}
 		}
-		if (D.ftc->eosOut == true) {
-			g_print("Received eos on usink...exiting\n") ;
-			terminate = TRUE ;
+		if  (D.eos[EOS_VSINK] == true) {
+			g_print("Received eos on vsink.") ;
+			if (dcvIsDataBuffered(D.ftc) > 0) {
+				g_print("Got pending data:%d\n", dcvBufferedBytes(D.ftc)) ;
+			}
+			g_print("Received eos on vsink... and all clear\n") ;
+			if (D.eos[EOS_USRC] == false && D.eosSent[EOS_USRC] == false) 
+			{
+				gst_app_src_end_of_stream(D.dsrc) ;
+				D.eosSent[EOS_USRC] = true ;
+			}
+			else
+			{
+				dcvFtConnClose(D.ftc) ;
+				terminate = TRUE ;
+			}
 		}
-
-
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
 }
 
