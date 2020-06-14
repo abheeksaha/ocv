@@ -268,12 +268,6 @@ int main( int argc, char** argv )
 
 		if (terminate == FALSE) 
 			terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
-#if 0
-		if (validstate(newstate) && validstate(oldstate) && newstate != oldstate )
-			g_print("New:%s Old:%s\n",
-					gst_element_state_get_name(newstate),
-					gst_element_state_get_name(oldstate)) ;
-#endif
 
 		ctr++ ;
 		if (newstate >= GST_STATE_READY) {
@@ -307,6 +301,8 @@ int main( int argc, char** argv )
 			}
 			if (D.ftc->totalbytes > D.ftc->spaceleft) { 
 				if (dcvFtcDebug) g_print("%d bytes pending\n",(D.ftc->totalbytes - D.ftc->spaceleft)) ; 
+			}
+			else {
 			}
 		}
 		if  (D.eos[EOS_VSINK] == true) {

@@ -100,9 +100,9 @@ int main( int argc, char** argv )
 	gboolean tx=TRUE ;
 	gint vfmatch=0;
 	static dcvFrameData_t Dv ;
-	gboolean localdisplay = true ;
-	char srcdesc[1024] ;
+	gboolean localdisplay = false ;
 	char *pdesc = termdesc ;
+	char srcdesc[1024] ;
 	guint txport = 50020 ;
 	char ipaddress[45] = "192.168.1.71" ;
 	grcvr_mode_e grcvrMode = GRCVR_LAST ;
@@ -124,7 +124,6 @@ int main( int argc, char** argv )
 	int longindex;
 
 	Dv.num_frames = 0 ;
-	strcpy(srcdesc,termdesc) ;
 	while ((ch = getopt_long(argc, argv, "r:hp:i:l",longOpts,&longindex)) != -1) {
 		if (ch == 'r')
 		{
@@ -154,6 +153,7 @@ int main( int argc, char** argv )
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
 	if (grcvrMode == GRCVR_INTERMEDIATE) pdesc = relaydesc ;
+	else if (grcvrMode == GRCVR_LAST) localdisplay = true ;
 	sprintf(srcdesc,pdesc,(localdisplay == true? "autovideosink":"fakesink")) ;
 
 	
