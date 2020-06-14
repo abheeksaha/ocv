@@ -20,5 +20,18 @@ gdyn and grcvr communicate using TCP, which saves us from packet dropping; there
 both programs, use the -h option to see how to set the destination and transmit ports and (in the case of
 gdyn) the transmit IP address.
 
+UPDATED: 14th June, 2020
+========================
+Added a new mode to grcvr. If you call grcvr with the options => grcvr -r <inport> -p <oport> --mode=inter, it
+will act as a relay stage allowing you to add arbitrary intermediate stages...technically you can do:
+Machine1: ./grcvr -r 50020
+Machine2: ./grcvr -r 50019 -p 50020 -i<ip address of Machine1> --mode=inter
+Machine3: ./grcvr -r 50018 -p 50019  -i<ip address of Machine2> --mode=inter
+Machine4: ./gdyn -n 50017 -p 50018  -i<ip address of Machine3>// Opens gdyn in network mode, listening to port 50017
+Machine5: ./udpclient.sh 50017 <ipaddress of machine4>
+
+And you should have a flow of video frames from udpclient to gdyn to two intermediate grcvr stages to final grcvr
+stage where it will be displayed. I have only tested one intermediate stage, my machine cannot handle all these
+other stages. 
 
 -Abheek
