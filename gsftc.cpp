@@ -19,6 +19,8 @@
 #include <gst/app/app.h>
 #include "gsftc.hpp"
 
+#include <unistd.h>
+
 extern int dcvFtcDebug ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport)
 {
@@ -229,6 +231,8 @@ int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 				if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
 				if (maxbytes > 0) break ;
 			}
+			else 
+				usleep(1000) ;
 		}
 		if (maxbytes > 0)
 		{
@@ -242,9 +246,7 @@ int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 			/** More data required **/
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 				if (*pfinished == TRUE) return tbytes ;
-				else {
-				       flags = 0;
-				}
+				else continue ;
 			}
 			else
 			{

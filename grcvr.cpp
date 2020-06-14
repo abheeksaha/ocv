@@ -19,7 +19,7 @@
 #define MAX_STAY 1
 static void help(char *name)
 {
-	g_print("Usage: %s -r <port number to listen on> [--mode [inter|first|last] -p txport -i txdest]\n",name) ;  
+	g_print("Usage: %s -r <port number to listen on> [--mode [inter|first|last] -p txport -i txdest] -l|--localDisplay\n",name) ;  
 	g_print("If -p or -i is set, %s goes to relay mode\n",name) ;
 	exit(1) ;
 }
@@ -66,7 +66,7 @@ static char termdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! vp9dec name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
-appsrc name=vdisp ! queue ! video/x-raw,height=480,width=848,format=BGR ! autovideosink";
+appsrc name=vdisp ! queue ! video/x-raw,height=480,width=848,format=BGR ! %s";
 
 static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
@@ -74,7 +74,7 @@ rpdmx.src_96 ! queue name=q1 ! rtpvp9depay name=vp9d ! tee name=tpoint \
 rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! appsink name=dsink \
 tpoint.src_0 ! queue name=q3 ! vp9dec name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 rtpmux name=mux !  queue ! appsink name=usink \
-appsrc name=vdisp ! queue name=q5 ! video/x-raw,height=480,width=848,format=BGR ! fakesink \
+appsrc name=vdisp ! queue name=q5 ! video/x-raw,height=480,width=848,format=BGR ! %s \
 tpoint.src_1 ! queue name=q6 ! rtpvp9pay ! mux.sink_0 \
 appsrc name=dsrc ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
 
@@ -100,8 +100,9 @@ int main( int argc, char** argv )
 	gboolean tx=TRUE ;
 	gint vfmatch=0;
 	static dcvFrameData_t Dv ;
-	gboolean localdisplay = TRUE ;
-	char *srcdesc = termdesc ;
+	gboolean localdisplay = true ;
+	char srcdesc[1024] ;
+	char *pdesc = termdesc ;
 	guint txport = 50020 ;
 	char ipaddress[45] = "192.168.1.71" ;
 	grcvr_mode_e grcvrMode = GRCVR_LAST ;
@@ -118,12 +119,13 @@ int main( int argc, char** argv )
 		{ "recvport", required_argument, 0, 'r' },
 		{ "sendport", required_argument, 0, 'p' },
 		{ "sendaddr", required_argument, 0, 'i' },
-		{ "localDisplay", required_argument, 0, 13 },
+		{ "localDisplay", required_argument, 0, 'l' },
 		{ 0,0,0,0 }} ;
 	int longindex;
 
 	Dv.num_frames = 0 ;
-	while ((ch = getopt_long(argc, argv, "r:hp:i:",longOpts,&longindex)) != -1) {
+	strcpy(srcdesc,termdesc) ;
+	while ((ch = getopt_long(argc, argv, "r:hp:i:l",longOpts,&longindex)) != -1) {
 		if (ch == 'r')
 		{
 			rxport = atoi(optarg) ; g_print("Setting rxport:%d\n",rxport) ; 
@@ -146,11 +148,14 @@ int main( int argc, char** argv )
 		}
 		else if (ch == 'i') { strcpy(ipaddress,optarg) ; }
 		else if (ch == 'p') { txport = atoi(optarg) ; }
+		else if (ch == 'l') { localdisplay = true ; }
 		else ;
 	}
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
-	if (grcvrMode == GRCVR_INTERMEDIATE) srcdesc = relaydesc ;
+	if (grcvrMode == GRCVR_INTERMEDIATE) pdesc = relaydesc ;
+	sprintf(srcdesc,pdesc,(localdisplay == true? "autovideosink":"fakesink")) ;
+
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc ;
 
@@ -384,7 +389,7 @@ GRCVR_PROCESS:
 					videoFrameWaiting = qe->nb ;
 					GstCaps *vcaps = qe->caps ;
 					newDataFrame = dcvProcessStage( videoFrameWaiting, vcaps,dataFrameWaiting, &Dv, stagef, &newVideoFrame ) ;
-					if (localdisplay == TRUE) 
+					if (localdisplay == TRUE && grcvrMode == GRCVR_LAST) 
 						if (dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,Dv.num_frames) != -1) Dv.num_frames++ ;
 					g_print("State of video queue:%d\n",g_queue_get_length(D.videoframequeue.bufq)) ;
 					

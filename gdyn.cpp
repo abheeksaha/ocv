@@ -85,6 +85,11 @@ int main( int argc, char** argv )
 	strcpy(clientipaddr,"192.168.1.71") ;
 	GstCaps *vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
 	GstCaps *dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
+	static struct option longOpts[] = {
+		{ "help", no_argument, 0, 'h' },
+		{ "localDisplay", required_argument, 0, 'l' },
+		{ 0,0,0,0 }} ;
+	int longindex;
 
 	while ((ch = getopt(argc, argv, "p:i:f:hn:l")) != -1) {
 		if (ch == 'p')
