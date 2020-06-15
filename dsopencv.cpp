@@ -427,7 +427,7 @@ int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasi
 #endif
         for( i = 0; i < pointsg.size(); i++ )
         {
-              circle( img, pointsg[i], 10, Scalar(128,128,0), 1, 8);
+              circle( img, pointsg[i], 4, Scalar(128,128,0), -1, 8);
         }
 	size = 0 ;
 	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
@@ -466,7 +466,37 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
                     continue;
 	
                 points1[k++] = points1[i];
-                circle( img, points1[i], 3, Scalar(0,255,0), -1, 8);
+//                circle( img, points1[i], 3, Scalar(0,255,0), -1, 8);
+                {
+            		int line_thickness = 4;
+			/* CV_RGB(red, green, blue) is the red, green, and blue components
+			 * of the color you want, each out of 255.  */	
+
+			CvScalar line_color = CV_RGB(0,0,255);
+			CvPoint p,q;
+			p.x = (int) points0[i].x;
+			p.y = (int) points0[i].y;
+			q.x = (int) points1[i].x;
+			q.y = (int) points1[i].y;
+			double angle;		angle = atan2( (double) p.y - q.y, (double) p.x - q.x );
+			double hypotenuse;	hypotenuse = sqrt( pow(p.y - q.y,2.0) + pow(p.x - q.x,2.0) );
+			/* Here we lengthen the arrow by a factor of three. */
+			q.x = (int) (p.x - 3 * hypotenuse * cos(angle));
+			q.y = (int) (p.y - 3 * hypotenuse * sin(angle));
+			/* Now we draw the main line of the arrow. */
+			/* "frame1" is the frame to draw on.
+			 * "p" is the point where the line begins.  "q" is the point where the line stops.
+			 * "CV_AA" means antialiased drawing.  "0" means no fractional bits in the center cooridinate or radius.
+			 */
+			line( img, p, q, line_color, line_thickness, 16 ,0 );   
+			/** Arrow tips **/
+			p.x = (int) (q.x + 9 * cos(angle + M_PI / 4));
+			p.y = (int) (q.y + 9 * sin(angle + M_PI / 4));
+			line( img, p, q, line_color, line_thickness, 16, 0 );
+			p.x = (int) (q.x + 9 * cos(angle - M_PI / 4));
+			p.y = (int) (q.y + 9 * sin(angle - M_PI / 4));
+			line( img, p, q, line_color, line_thickness, 16, 0 );
+		}
             }
             points1.resize(k);
 	}

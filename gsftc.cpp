@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
 
@@ -58,6 +59,8 @@ dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddre
 			g_print("Outbound Socket creation failed!:%s\n",strerror(errno)) ;
 			goto RETURNNULL ;
 		}
+		int one =1 ;
+		setsockopt(D->outsock, IPPROTO_TCP, TCP_NODELAY,&one,sizeof(one)) ;
 		memset((void *)&D->dstaddr, sizeof(sockaddr_in),0);
 		D->dstaddr.sin_family = AF_INET;
 		inet_aton(outaddress,&D->dstaddr.sin_addr) ;

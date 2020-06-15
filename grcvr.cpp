@@ -389,7 +389,7 @@ GRCVR_PROCESS:
 					videoFrameWaiting = qe->nb ;
 					GstCaps *vcaps = qe->caps ;
 					newDataFrame = dcvProcessStage( videoFrameWaiting, vcaps,dataFrameWaiting, &Dv, stagef, &newVideoFrame ) ;
-					if (localdisplay == TRUE && grcvrMode == GRCVR_LAST) 
+					if (localdisplay == TRUE) 
 						if (dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,Dv.num_frames) != -1) Dv.num_frames++ ;
 					g_print("State of video queue:%d\n",g_queue_get_length(D.videoframequeue.bufq)) ;
 					
@@ -410,6 +410,7 @@ GRCVR_PROCESS:
 				/** Clean up the video frame queue **/
 				dcvFtConnStatus(D.ftc,D.eos[EOS_USRC],D.eos[EOS_USINK], D.eosSent[EOS_USINK]) ;
 				dcvAppSrcStatus(D.usrc,&D.usrcstate) ;
+				g_print(".") ;
 			}
 			if (D.usrcstate.state == G_WAITING) {
 				if (D.usrcstate.finished != TRUE) {
@@ -419,7 +420,7 @@ GRCVR_PROCESS:
 						g_print("End of stream achieved\n") ;
 					}
 				}
-				else { /** Connection closed from sender side, try and clear out the packets **/
+				else if (dcvIsDataBuffered(D.ftc)){ /** Connection closed from sender side, try and clear out the packets **/
 					bpushed = dcvPushBuffered(D.usrc,D.ftc) ;
 					if (dcvFtcDebug & 0x03)g_print("dcvPushbuffered:Pushed %d bytes\n",bpushed ) ;
 					if (D.ftc->totalbytes == D.ftc->spaceleft) {
