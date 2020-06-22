@@ -78,12 +78,18 @@ gboolean dcvFtConnStart(dcv_ftc_t *D)
 {
 	g_print("Trying to start connections!\n") ;
 	if (D->outsock != -1) {
-		if (connect(D->outsock,(struct sockaddr *) &D->dstaddr,sizeof(struct sockaddr)) < 0) {
-			g_print("ERROR connecting:%s\n",strerror(errno));
-			return FALSE ;
-		}
-	else {
-		g_print("Connected to server:%s:%u\n",inet_ntoa(D->dstaddr.sin_addr),D->dstaddr.sin_port) ;
+		while(1)
+		{
+			if (connect(D->outsock,(struct sockaddr *) &D->dstaddr,sizeof(struct sockaddr)) < 0) {
+				g_print("ERROR connecting:%s\n",strerror(errno));
+				g_print("waiting for connection ....\n");
+				sleep(5);
+				//return FALSE ;
+			}
+			else {
+				g_print("Connected to server:%s:%u\n",inet_ntoa(D->dstaddr.sin_addr),D->dstaddr.sin_port) ;
+				break;
+			}
 		}
 	}
 	if (D->servsock != -1) {

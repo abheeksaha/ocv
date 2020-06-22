@@ -12,7 +12,7 @@
 #include "dsopencv.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display)\n",name) ;  
+	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display) -w (to wait for signal)\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -42,6 +42,14 @@ int dcvFtcDebug=0;
 #include "gutils.hpp"
 #include "rseq.hpp"
 #include <signal.h>
+#include <string>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+
+int wait_for_signal = 1 ;
+
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
 extern void walkPipeline(GstBin *bin) ;
 
@@ -60,6 +68,66 @@ static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue 
 			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
+std::string sdesc = "udpsrc name=usrc address= port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
+                          rtpmux name=mux ! queue ! appsink  name=usink \
+                          tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+                          tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
+                          appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
+                          appsrc name=dsrc ! queue ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+
+/*signal handler for edge node */
+void handle_signal(int sig)
+{
+	g_print("sigusr received \n");
+	wait_for_signal = 0;
+
+}
+
+char * addEdgeIpaddressTopdesc()
+{
+	char self_ip[20];
+	memset(self_ip,"\0",20);
+	struct if_nameindex *if_nid, *intf;
+	char if_name[20],*p;
+	if_nid = if_nameindex();
+	if ( if_nid != NULL )
+	{
+		for (intf = if_nid; intf->if_index != 0 || intf->if_name != NULL; intf++)
+		{
+			p=strstr(intf->if_name,"vEth");
+			if(p)
+			{       /*getting name of kni interface */
+				strcpy(if_name,intf->if_name);
+			}
+		}
+
+		if_freenameindex(if_nid);
+	}
+	g_print("kni interface %s \n",if_name);
+
+	int fd;
+	struct ifreq ifr;
+	char int_name[20];
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	ifr.ifr_addr.sa_family = AF_INET;
+	strncpy(ifr.ifr_name, if_name, IFNAMSIZ-1);
+	ioctl(fd, SIOCGIFADDR, &ifr);
+	close(fd);
+	/*getting ip address of kni interface*/
+	strcpy(self_ip,inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+	g_print("ip address=%s \n",self_ip);
+
+	std::string s1;
+	s1="address=";
+	size_t pos1 = sdesc.find(s1);
+	if (pos1 != std::string::npos)
+		sdesc.insert(pos1 + s1.size(), self_ip);
+	const char *srcfinal = sdesc.c_str();
+	return srcfinal;
+
+}
+
 int main( int argc, char** argv )
 {
 
@@ -72,10 +140,12 @@ int main( int argc, char** argv )
 	char pipedesc[8192];
 	char *pdesc = fdesc;
 	gboolean inputfromnet=FALSE ;
+	gboolean waitflag=FALSE ;
 	guint txport = 50018;
 	guint rxport = 0;
 	gboolean dotx = TRUE ;
 	gboolean localdisplay = false ;
+	gboolean selfip = false;
 	char clientipaddr[1024];
 	char videofile[1024] ; 
 	static dcvFrameData_t Dv ;
@@ -91,7 +161,10 @@ int main( int argc, char** argv )
 		{ 0,0,0,0 }} ;
 	int longindex;
 
-	while ((ch = getopt(argc, argv, "p:i:f:hn:l")) != -1) {
+	/*registering signal handler*/
+        signal(SIGUSR1, handle_signal);
+
+	while ((ch = getopt(argc, argv, "p:i:f:hn:lw")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -101,13 +174,31 @@ int main( int argc, char** argv )
 		if (ch == 'f') { strcpy(videofile, optarg) ;  }
 		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
+		if (ch == 'w') { waitflag=TRUE;  }
+
 	}
+
+	/* check if application needs to wait for signal in case of intel edgenode*/
+	if(TRUE == waitflag )
+	{
+		/*waiting for sigusr signal*/
+		while(wait_for_signal)
+		{
+			g_print("waiting for signal .....\n");
+			sleep(5);
+		}
+		/*calling function to add kni interface ip address in gst pipeline */
+		pdesc=addEdgeIpaddressTopdesc();
+	}
+
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (my_category, "gdyn", 0, "This is my very own");
 
 	g_print("Using txport = %u\n",txport) ;
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc, *srcpad ;
+
+	
 	if (localdisplay) {
 		sprintf(pipedesc,pdesc,"autovideosink") ;
 	}
@@ -115,6 +206,7 @@ int main( int argc, char** argv )
 		sprintf(pipedesc,pdesc,"fakesink") ;
 	}
 
+	
 	gerr = NULL ;
 	GError * error = NULL;
 	D.pipeline = gst_parse_launch(pipedesc,&error);
