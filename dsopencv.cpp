@@ -472,7 +472,7 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 			/* CV_RGB(red, green, blue) is the red, green, and blue components
 			 * of the color you want, each out of 255.  */	
 
-			CvScalar line_color = CV_RGB(0,0,255);
+			cv::Scalar line_color = CV_RGB(0,0,255);
 			CvPoint p,q;
 			p.x = (int) points0[i].x;
 			p.y = (int) points0[i].y;
