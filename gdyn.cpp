@@ -12,7 +12,7 @@
 #include "dsopencv.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display) -b <intel>(fot intel platform)\n",name) ;  
+	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display) -e <TRUE>(fot intel platform)\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -76,7 +76,7 @@ std::string sdesc = "udpsrc name=usrc address= port=50017 ! queue ! application/
 /*search if  ip address is assigned to the kni interface*/
 char * findIpaddress()
 {
-	char * self_ip;
+	char * self_ip=NULL;
 	struct if_nameindex *if_nid, *intf;
 	char if_name[20],*p;
 	if_nid = if_nameindex();
@@ -105,7 +105,6 @@ char * findIpaddress()
 	if(ioctl(fd, SIOCGIFADDR, &ifr) >=0)
 	{
 		self_ip = inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
-		//strcpy(self_ip,inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
 		g_print("ip address=%s \n",self_ip);
 
 		close(fd);
@@ -163,7 +162,7 @@ int main( int argc, char** argv )
 	int longindex;
 
 
-	while ((ch = getopt(argc, argv, "p:i:f:hn:lb:")) != -1) {
+	while ((ch = getopt(argc, argv, "p:i:f:hn:le:")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -173,10 +172,9 @@ int main( int argc, char** argv )
 		if (ch == 'f') { strcpy(videofile, optarg) ;  }
 		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
-		if (ch == 'b')
+		if (ch == 'e')
                 {
-                        g_print("option = %s\n",optarg);
-                        if(!strcmp(optarg,"intel"))
+                        if(!strcmp(optarg,"TRUE"))
                         {
                                 intel_platform=TRUE;
                         }
@@ -188,7 +186,7 @@ int main( int argc, char** argv )
 	/* check if application is running on  intel edgenode*/
 	if(TRUE == intel_platform )
 	{
-		char * ip_address;
+		char * ip_address=NULL;
 		/*waiting for ipaddress*/
 		while(1)
 		{
@@ -197,12 +195,11 @@ int main( int argc, char** argv )
 			{	g_print("ip addr is %s \n",ip_address);
 				break;
 			}
-			g_print("ip address not assigned to kni interface .....\n");
-			sleep(10);
+			g_print("waiting for ip address to be assigned to kni interface .....\n");
+			sleep(5);
 		}
 		/*calling function to add kni interface ip address in gst pipeline */
 		pdesc=addEdgeIpaddressTopdesc(ip_address);
-		g_print("pdesc= %s \n",pdesc);
 	}
 
 	gst_init(&argc, &argv) ;
