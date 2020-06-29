@@ -158,13 +158,14 @@ int main( int argc, char** argv )
 	static struct option longOpts[] = {
 		{ "help", no_argument, 0, 'h' },
 		{ "localDisplay", required_argument, 0, 'l' },
+		{ "debug", required_argument, 0, 'd' },
 		{ 0,0,0,0 }} ;
 	int longindex;
 
 	/*registering signal handler*/
         signal(SIGUSR1, handle_signal);
 
-	while ((ch = getopt(argc, argv, "p:i:f:hn:lw")) != -1) {
+	while ((ch = getopt_long(argc, argv, "p:i:f:hn:lw",longOpts,&longindex)) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -174,6 +175,7 @@ int main( int argc, char** argv )
 		if (ch == 'f') { strcpy(videofile, optarg) ;  }
 		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
+		if (ch == 'd') { dcvFtcDebug = atoi(optarg) & 0x03 ;  }
 		if (ch == 'w') { waitflag=TRUE;  }
 
 	}
@@ -357,6 +359,7 @@ int main( int argc, char** argv )
 		GstMemory *vmem,*dmem;
 		GstSegment *dbseg = NULL ;
 		static guint vbufsnt = 0;
+		static guint notprocessed = 6 ;
 
 		if (terminate == FALSE) 
 			terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
@@ -372,11 +375,12 @@ int main( int argc, char** argv )
 				vcaps = dv->caps;
 				GstBuffer * newVideoFrame ;
 				GstBuffer * databuf ;
+				notprocessed = 0 ;
 				if (v!=NULL) {
 					databuf = dcvProcessStage(v,vcaps,NULL,&Dv,stage1,&newVideoFrame) ;
 
 // Add a message dat	
-					if (dotx && (databuf != NULL) )
+					if ( dotx && (databuf != NULL) )
 					{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 						g_print("Pushing data buffer number %d...(ret=%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
@@ -384,9 +388,14 @@ int main( int argc, char** argv )
 					}
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
-					dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,++Dv.num_frames) ;
+					if (localdisplay) dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,++Dv.num_frames) ;
 				}
 			}
+			if (++notprocessed == 5) {
+				g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
+				notprocessed = 0 ;
+			}
+
 			while (D.ftc->totalbytes > D.ftc->spaceleft) {
 				if (dcvFtcDebug) g_print("Pending data in input buffer! %d bytes\n",D.ftc->totalbytes - D.ftc->spaceleft) ;
 				if (dcvPushBuffered(GST_APP_SRC_CAST(D.fsrc),D.ftc)  <= 0) break ;
@@ -397,8 +406,12 @@ int main( int argc, char** argv )
 			else {
 			}
 		}
+			if (++notprocessed == 5) {
+				g_print("External:newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
+				notprocessed = 0 ;
+			}
 		if  (D.eos[EOS_VSINK] == true) {
-			g_print("Received eos on vsink.") ;
+			g_print("Received eos on vsink.newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
 			if (dcvIsDataBuffered(D.ftc) > 0) {
 				g_print("Got pending data:%d\n", dcvBufferedBytes(D.ftc)) ;
 			}

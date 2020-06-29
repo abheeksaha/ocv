@@ -322,13 +322,13 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 	ld.pD = (dcv_bufq_t *)d ;
 
 	if (d == NULL) {
-		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
+//		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK;
 	}
 
 	GstSample *gsm ;
 	if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
-		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),ld.pD->lastData.tv_sec, ld.pD->lastData.tv_usec,g_queue_get_length(ld.pD->bufq)) ;
+//		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),ld.pD->lastData.tv_sec, ld.pD->lastData.tv_usec,g_queue_get_length(ld.pD->bufq)) ;
 		ld.caps = gst_sample_get_caps(gsm) ;
 		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
 		if (glb != NULL) {
@@ -361,7 +361,7 @@ gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD)
 	g_queue_push_tail(D->pD->bufq,bcnt) ;
 	gettimeofday(&D->pD->lastData,&D->pD->tz) ;
 	D->pD->entries++ ;
-	g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
+//	g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
 	return true;
 }
 

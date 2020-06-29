@@ -66,7 +66,7 @@ static char termdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! vp9dec name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
-appsrc name=vdisp ! queue ! video/x-raw,height=480,width=848,format=BGR ! %s";
+appsrc name=vdisp ! queue ! video/x-raw,format=BGR ! %s";
 
 static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
@@ -74,7 +74,7 @@ rpdmx.src_96 ! queue name=q1 ! rtpvp9depay name=vp9d ! tee name=tpoint \
 rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! appsink name=dsink \
 tpoint.src_0 ! queue name=q3 ! vp9dec name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 rtpmux name=mux !  queue ! appsink name=usink \
-appsrc name=vdisp ! queue name=q5 ! video/x-raw,height=480,width=848,format=BGR ! %s \
+appsrc name=vdisp ! queue name=q5 ! video/x-raw,format=BGR ! %s \
 tpoint.src_1 ! queue name=q6 ! rtpvp9pay ! mux.sink_0 \
 appsrc name=dsrc ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
 
@@ -363,7 +363,6 @@ int main( int argc, char** argv )
 				}
 
 				else if ( ((vfmatch = dcvFindMatchingContainer(D.videoframequeue.bufq,dataFrameContainer)) == -1) ) {
-					g_assert(vfmatch != -1) ;
 					g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",vfmatch, g_queue_get_length(D.videoframequeue.bufq), g_queue_get_length(D.olddataqueue.bufq)) ;
 #if 1
 					if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
