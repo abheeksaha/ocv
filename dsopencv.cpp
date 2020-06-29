@@ -83,6 +83,7 @@
 #define CV_GST_FORMAT(format) (format)
 
 
+int dcvOptDebug = 0;
 
 namespace cv {
 
@@ -388,7 +389,7 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 			pointsg.resize(0) ;
 			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 		}
-		g_print("Stage1:return %d bytes\n",size) ;
+		if (dcvOptDebug) g_print("Stage1:return %d bytes\n",size) ;
 
 	}
 	return size;
@@ -410,20 +411,6 @@ int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasi
 	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
 	cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
 #if 0
-	if (size >0 && ( (nitems = readFromBuffer(pointlist,pointsize, &points1)) == -1)) {
-	       g_print("Read from buffer empty\n")	;
-	       return -1 ;
-	}
-	else if (nitems == 0) g_print("No new points, please carry on using old points\n") ;
-	else if (!points1.empty())
-        {
-		int i,k;
-            for( i = k = 0; i < points1.size(); i++ )
-            {
-                circle( img, points1[i], 3, Scalar(128,128,0), -1, 8);
-            }
-	    size = writeToArray(points1, (char *)pointlist, outdatasize) ;
-	}
 #endif
         for( i = 0; i < pointsg.size(); i++ )
         {
@@ -431,7 +418,7 @@ int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasi
         }
 	size = 0 ;
 	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
-	g_print("Stagen:return %d bytes\n",size) ;
+	if (dcvOptDebug) g_print("Stagen:return %d bytes\n",size) ;
 //imshow...	
 	return size;
 }
@@ -451,14 +438,14 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 	       g_print("Read from buffer failed\n")	;
 	       return -1 ;
 	}
-	else if (nitems == 0) g_print("No new points, please carry on using old points\n") ;
+	else if (nitems == 0) if (dcvOptDebug) g_print("No new points, please carry on using old points\n") ;
 	if (!points0.empty())
         {
 		if(prevGray.empty())
 			img.copyTo(prevGray);
             calcOpticalFlowPyrLK(prevGray, gray, points0, points1, status, err, winSize,
                                  3, termcrit, 0, 0.001);
-	    g_print("Optical flow computed\n") ;
+	    if (dcvOptDebug) g_print("Optical flow computed\n") ;
             size_t i, k;
             for( i = k = 0; i < points1.size(); i++ )
             {
@@ -538,7 +525,7 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 	else {
 		size = stage(img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
 	}
-	g_print("Stage fn writes %d bytes\n",size) ;
+	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
 	
 	if (size > 0)
 	{

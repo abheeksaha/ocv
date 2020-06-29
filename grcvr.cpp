@@ -85,7 +85,8 @@ typedef enum {
 } grcvr_mode_e ;
 
 extern bufferCounter_t inbc,outbc;
-int dcvFtcDebug=0;
+extern int dcvFtcDebug;
+extern int dcvGstDebug;
 int main( int argc, char** argv )
 {
 
@@ -123,6 +124,7 @@ int main( int argc, char** argv )
 		{ 0,0,0,0 }} ;
 	int longindex;
 
+	dcvFtcDebug = dcvGstDebug = 0 ;
 	Dv.num_frames = 0 ;
 	while ((ch = getopt_long(argc, argv, "r:hp:i:l",longOpts,&longindex)) != -1) {
 		if (ch == 'r')
@@ -143,6 +145,7 @@ int main( int argc, char** argv )
 			}
 			else { g_print("\n") ; dbgFlags = DBG_DEFAULT ;  }
 			dcvFtcDebug = (dbgFlags & DBG_FTC_MASK) ;
+			dcvGstDebug = ((dbgFlags >> 2) & DBG_FTC_MASK) ;
 			g_print("DcvFtcDebug is set to %d\n",dcvFtcDebug) ;
 		}
 		else if (ch == 'i') { strcpy(ipaddress,optarg) ; }

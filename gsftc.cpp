@@ -22,7 +22,7 @@
 
 #include <unistd.h>
 
-extern int dcvFtcDebug ;
+int dcvFtcDebug ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport)
 {
 	dcv_ftc_t *D = malloc(sizeof(dcv_ftc_t)) ;

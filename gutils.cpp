@@ -11,6 +11,7 @@
 
 bufferCounter_t inbc,outbc;
 extern gboolean terminate ;
+int dcvGstDebug ;
 
 gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD) ;
 
@@ -240,7 +241,7 @@ int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d)
 		tmem = gst_buffer_get_all_memory(d->nb) ;
 		if (gst_memory_map(tmem, &tmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
 		memcpy((void *)&T,tmap.data,sizeof(tag_t)) ;
-		g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T.count,T.tstmp,T.seqsize) ;
+		if (dcvGstDebug) g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T.count,T.tstmp,T.seqsize) ;
 
 		if ((p = g_queue_find_custom(q,(void *)&T,dcvMatchContainer)) == NULL) 
 			rval = -1 ;
@@ -271,7 +272,7 @@ void testStats(GstElement *tst)
 /** Sink and Source Handlers **/
 void eosRcvd(GstAppSink *slf, gpointer D)
 {
-	g_print("eosRcvd:Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	if (dcvGstDebug) g_print("eosRcvd:Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
 	if (D) {
 	gboolean *eos = (gboolean *)D ;
 	*eos = TRUE ;
@@ -280,7 +281,7 @@ void eosRcvd(GstAppSink *slf, gpointer D)
 
 void eosRcvdSrc(GstAppSrc *slf, gpointer D)
 {
-	g_print("eosRcvdSrc:Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
+	if (dcvGstDebug) g_print("eosRcvdSrc:Eos on %s\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf))) ;
 	gboolean *eos = (gboolean *)D ;
 	*eos = TRUE ;
 }
@@ -322,13 +323,13 @@ GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 	ld.pD = (dcv_bufq_t *)d ;
 
 	if (d == NULL) {
-//		g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		if (dcvGstDebug) g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
 		return GST_FLOW_OK;
 	}
 
 	GstSample *gsm ;
 	if ((gsm = gst_app_sink_pull_sample(slf)) != NULL) {
-//		g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),ld.pD->lastData.tv_sec, ld.pD->lastData.tv_usec,g_queue_get_length(ld.pD->bufq)) ;
+		if (dcvGstDebug) g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),ld.pD->lastData.tv_sec, ld.pD->lastData.tv_usec,g_queue_get_length(ld.pD->bufq)) ;
 		ld.caps = gst_sample_get_caps(gsm) ;
 		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
 		if (glb != NULL) {
@@ -361,7 +362,7 @@ gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD)
 	g_queue_push_tail(D->pD->bufq,bcnt) ;
 	gettimeofday(&D->pD->lastData,&D->pD->tz) ;
 	D->pD->entries++ ;
-//	g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
+	if (dcvGstDebug) g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
 	return true;
 }
 
@@ -369,7 +370,7 @@ void dataFrameWrite(GstAppSrc *s, guint length, gpointer data)
 {
 	srcstate_t *pD = (srcstate_t *)data ;
 	if (pD->state != G_WAITING) {
-		g_print("%s Needs %d bytes of data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s)), length) ;
+		if (dcvGstDebug) g_print("%s Needs %d bytes of data\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(s)), length) ;
 		pD->state = G_WAITING;
 	}
 	pD->length=length;
@@ -378,7 +379,7 @@ void dataFrameStop(GstAppSrc *s, gpointer data)
 {
 	srcstate_t *pD = (srcstate_t *)data ;
 	if (pD->state != G_BLOCKED) {
-		g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
+		if (dcvGstDebug) g_print("%s full\n",GST_ELEMENT_NAME(GST_ELEMENT_CAST(s))) ;
 		pD->state = G_BLOCKED;
 	}
 }

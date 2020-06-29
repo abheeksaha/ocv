@@ -37,7 +37,8 @@ typedef struct {
 	dcv_ftc_t *ftc;
 } dpipe_t ;
 
-int dcvFtcDebug=0;
+extern int dcvFtcDebug;
+extern int dcvGstDebug;
 #include <getopt.h>
 #include "gutils.hpp"
 #include "rseq.hpp"
@@ -63,7 +64,7 @@ static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! tee
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "udpsrc name=usrc address=192.168.1.71 port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
-			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+			  tpoint.src_0 ! queue ! vp9dec name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
@@ -161,6 +162,8 @@ int main( int argc, char** argv )
 		{ "debug", required_argument, 0, 'd' },
 		{ 0,0,0,0 }} ;
 	int longindex;
+	dcvFtcDebug=0 ;
+	dcvGstDebug=0 ;
 
 	/*registering signal handler*/
         signal(SIGUSR1, handle_signal);
@@ -175,7 +178,7 @@ int main( int argc, char** argv )
 		if (ch == 'f') { strcpy(videofile, optarg) ;  }
 		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
-		if (ch == 'd') { dcvFtcDebug = atoi(optarg) & 0x03 ;  }
+		if (ch == 'd') { dcvFtcDebug = atoi(optarg) & 0x03 ; dcvGstDebug = (atoi(optarg) >> 2) & 0x03 ;  }
 		if (ch == 'w') { waitflag=TRUE;  }
 
 	}
@@ -392,7 +395,7 @@ int main( int argc, char** argv )
 				}
 			}
 			if (++notprocessed == 5) {
-				g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
+				if (dcvGstDebug & 0x02 == 0x02) g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
 				notprocessed = 0 ;
 			}
 
@@ -407,7 +410,7 @@ int main( int argc, char** argv )
 			}
 		}
 			if (++notprocessed == 5) {
-				g_print("External:newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
+				if (dcvGstDebug & 0x02 == 0x02) g_print("External:newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
 				notprocessed = 0 ;
 			}
 		if  (D.eos[EOS_VSINK] == true) {
