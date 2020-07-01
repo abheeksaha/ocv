@@ -316,6 +316,40 @@ typedef struct {
 	GstCaps * caps ;
 } dcv_bufq_loc_t  ;
 
+GstFlowReturn sink_trypullsample(GstAppSink *slf, dcv_bufq_t *d)
+{
+	int cnt=0;
+	dcv_bufq_loc_t ld ;
+	ld.pD = d ;
+
+	if (d == NULL) {
+		if (dcvGstDebug) g_print("New Sample in %s:\n",GST_ELEMENT_NAME(slf)) ;
+		return GST_FLOW_OK;
+	}
+
+	GstSample *gsm ;
+	if ((gsm = gst_app_sink_try_pull_sample(slf,1000000)) != NULL) {
+		if (dcvGstDebug) g_print("New Sample in %s (%u sec,%u musec): %u\n",GST_ELEMENT_NAME(slf),ld.pD->lastData.tv_sec, ld.pD->lastData.tv_usec,g_queue_get_length(ld.pD->bufq)) ;
+		ld.caps = gst_sample_get_caps(gsm) ;
+		GstBufferList *glb = gst_sample_get_buffer_list(gsm) ;
+		if (glb != NULL) {
+			if (gst_buffer_list_foreach(glb,sink_pushbufferToQueue,(gpointer)&ld) == TRUE)
+				return GST_FLOW_OK;
+			else 
+				return GST_FLOW_ERROR;
+		}
+		else 
+		{
+			GstBuffer *gb = gst_sample_get_buffer(gsm) ;
+			if (sink_pushbufferToQueue(gb,(gpointer) &ld) == TRUE)
+				return GST_FLOW_OK;
+			else
+				return GST_FLOW_ERROR ;
+		}
+	}
+	else
+		return GST_FLOW_ERROR ;
+}
 GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d)
 {
 	int cnt=0;

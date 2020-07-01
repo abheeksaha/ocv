@@ -159,12 +159,15 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 	guint64 avlbytes = dcvBufferedBytes(D) ;
 	if (maxbytes == 0) return maxbytes;
-	if (avlbytes < SIZEOFFRAMEHDR) return -1 ;
+	if (avlbytes < SIZEOFFRAMEHDR) { g_print("dcvPushBuffered:Don't even have a frame header avlbytes=%d\n",avlbytes) ; return -1 ; }
 	bsize = pfh[SZOFFSET] ;
 	if (dcvFtcDebug & 0x03) 
 		g_print("dcvPushBuffered:Bsize=%d Time=%d.%d sequence=%d maxbytes=%d availbytes=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET], maxbytes, avlbytes) ;
-	if ( bsize   > maxbytes) { return 0; }
-	if ( bsize >  (D->totalbytes - D->spaceleft)) { return -1; }
+	if ( bsize   > maxbytes) { g_print("dcvPushBuffered:Insufficient space in %s:needed=%d avail=%d\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf)), bsize, maxbytes) ; return 0; }
+	if ( bsize >  (D->totalbytes - D->spaceleft)) { 
+		g_print("dcvPushBuffered:buffer size (%d) too large for usrc space avail (%d)\n", bsize,D->totalbytes - D->spaceleft) ; 
+		return -2; 
+	}
 	if (pfh[UWOFFSET] != uw) donothing() ;
 	if (D->seqExpected != -1) {
 		g_assert(pfh[SEQOFFSET] == D->seqExpected) ;
@@ -218,13 +221,13 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 }
 int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 {
-	int nbytes,tbytes=0 ;
+	int nbytes,tbytes=0,tpbytes=0 ;
 	gboolean forceflush=TRUE ;
 	int flags = MSG_DONTWAIT ;
 	if (dcvIsDataBuffered(D)) flags = MSG_DONTWAIT ;
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 	if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Starting with maxbytes=%u, space avail=%u pfinished=%d\n",maxbytes,D->spaceleft,*pfinished) ;
-	while (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
+	if (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
 		while ( D->spaceleft > 0 && *pfinished == FALSE) {
 			nbytes = recv(D->insock,D->pbuf,D->spaceleft,flags) ;
 		/** See how much space there is in the array **/
@@ -240,12 +243,14 @@ int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 				if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
 				if (maxbytes > 0) break ;
 			}
-			else 
+			else {
 				usleep(1000) ;
+				break ;
+			}
 		}
 		if (maxbytes > 0)
 		{
-			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Trying to push %d bytes\n",maxbytes) ;
+			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Trying to push %d bytes\n",tbytes) ;
 			int pushedbytes = dcvPushBuffered(slf,D) ;
 			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Pushed %d bytes\n",pushedbytes) ;
 			if (pushedbytes == 0) {
@@ -255,13 +260,17 @@ int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 			/** More data required **/
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 				if (*pfinished == TRUE) return tbytes ;
-				else continue ;
+	//			else continue ;
+			}
+			else if (pushedbytes == -2) {
+				usleep(1000) ;
+				return tpbytes;
 			}
 			else
 			{
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
-				tbytes += pushedbytes ;
-				return tbytes ;
+				tpbytes += pushedbytes ;
+				return tpbytes ;
 			}
 		}
 	}

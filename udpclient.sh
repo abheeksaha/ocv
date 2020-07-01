@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 file="v1.webm"
 destination="192.168.1.71"
 port="50018"
@@ -19,4 +19,6 @@ if [ $# -gt 2 ]; then
 fi 
 echo "Using destination=$destination port=$port file=$file";
 
-gst-launch-1.0 filesrc location=$file ! matroskademux ! rtpvp9pay ! udpsink host=$destination port=$port
+gst-launch-1.0 rtpbin name=rbin \
+	filesrc location=$file ! matroskademux ! rtpvp9pay ! application/x-rtp,media=video,clock-rate=90000 ! rbin.send_rtp_sink_0 \
+	rbin.send_rtp_src_0 ! udpsink host=$destination port=$port
