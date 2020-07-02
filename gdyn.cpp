@@ -12,7 +12,7 @@
 #include "dsopencv.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display) -w (to wait for signal)\n",name) ;  
+	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display) -e <TRUE>(fot intel platform)\n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -51,8 +51,6 @@ extern int dcvGstDebug;
 #include <net/if.h>
 #include <arpa/inet.h>
 
-int wait_for_signal = 1 ;
-
 static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
 static GstCaps * rtpbinPtAdded(GstElement *rbin, guint ssrc, guint pt, gpointer d) ;
 static void rtpbinPadAdded(GstElement *s, GstPad *p, gpointer *D) ;
@@ -82,18 +80,10 @@ std::string sdesc = "udpsrc name=usrc address= port=50017 ! queue ! application/
                           appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
                           appsrc name=dsrc ! queue ! application/x-rtp,media=application,clock-rate=20000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
-/*signal handler for edge node */
-void handle_signal(int sig)
+/*search if  ip address is assigned to the kni interface*/
+char * findIpaddress()
 {
-	g_print("sigusr received \n");
-	wait_for_signal = 0;
-
-}
-
-char * addEdgeIpaddressTopdesc()
-{
-	char self_ip[20];
-	memset(self_ip,"\0",20);
+	char * self_ip=NULL;
 	struct if_nameindex *if_nid, *intf;
 	char if_name[20],*p;
 	if_nid = if_nameindex();
@@ -119,12 +109,23 @@ char * addEdgeIpaddressTopdesc()
 
 	ifr.ifr_addr.sa_family = AF_INET;
 	strncpy(ifr.ifr_name, if_name, IFNAMSIZ-1);
-	ioctl(fd, SIOCGIFADDR, &ifr);
-	close(fd);
-	/*getting ip address of kni interface*/
-	strcpy(self_ip,inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
-	g_print("ip address=%s \n",self_ip);
+	if(ioctl(fd, SIOCGIFADDR, &ifr) >=0)
+	{
+		self_ip = inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+		g_print("ip address=%s \n",self_ip);
 
+		close(fd);
+		return self_ip;
+	}
+	else
+		close(fd);
+	return NULL;
+
+}
+
+/*insert ip address into the gdyn pipeline*/
+char * addEdgeIpaddressTopdesc(char * self_ip)
+{
 	std::string s1;
 	s1="address=";
 	size_t pos1 = sdesc.find(s1);
@@ -147,12 +148,11 @@ int main( int argc, char** argv )
 	char pipedesc[8192];
 	char *pdesc = fdesc;
 	gboolean inputfromnet=FALSE ;
-	gboolean waitflag=FALSE ;
 	guint txport = 50018;
 	guint rxport = 0;
 	gboolean dotx = TRUE ;
 	gboolean localdisplay = false ;
-	gboolean selfip = false;
+	gboolean intel_platform = FALSE;
 	char clientipaddr[1024];
 	char videofile[1024] ; 
 	static dcvFrameData_t Dv ;
@@ -172,10 +172,9 @@ int main( int argc, char** argv )
 	dcvFtcDebug=0 ;
 	dcvGstDebug=0 ;
 
-	/*registering signal handler*/
-        signal(SIGUSR1, handle_signal);
 
-	while ((ch = getopt_long(argc, argv, "p:i:f:hn:lw",longOpts,&longindex)) != -1) {
+
+	while ((ch = getopt(argc, argv, "p:i:f:hn:le:")) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -186,21 +185,33 @@ int main( int argc, char** argv )
 		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
 		if (ch == 'd') { dcvFtcDebug = atoi(optarg) & 0x03 ; dcvGstDebug = (atoi(optarg) >> 2) & 0x03 ;  }
-		if (ch == 'w') { waitflag=TRUE;  }
+		if (ch == 'e')
+                {
+                        if(!strcmp(optarg,"TRUE"))
+                        {
+                                intel_platform=TRUE;
+                        }
 
+          }
 	}
 
-	/* check if application needs to wait for signal in case of intel edgenode*/
-	if(TRUE == waitflag )
+	/* check if application is running on  intel edgenode*/
+	if(TRUE == intel_platform )
 	{
-		/*waiting for sigusr signal*/
-		while(wait_for_signal)
+		char * ip_address=NULL;
+		/*waiting for ipaddress*/
+		while(1)
 		{
-			g_print("waiting for signal .....\n");
+			ip_address=findIpaddress();
+			if(ip_address!=NULL)
+			{	g_print("ip addr is %s \n",ip_address);
+				break;
+			}
+			g_print("waiting for ip address to be assigned to kni interface .....\n");
 			sleep(5);
 		}
 		/*calling function to add kni interface ip address in gst pipeline */
-		pdesc=addEdgeIpaddressTopdesc();
+		pdesc=addEdgeIpaddressTopdesc(ip_address);
 	}
 
 	gst_init(&argc, &argv) ;
