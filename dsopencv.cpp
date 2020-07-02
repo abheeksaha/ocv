@@ -83,6 +83,7 @@
 #define CV_GST_FORMAT(format) (format)
 
 
+int dcvOptDebug = 0;
 
 namespace cv {
 
@@ -143,7 +144,7 @@ static gboolean determineFrameDims(Size *sz, gint* channels, bool* isOutputByteB
     // bail out in no caps
     if (!GST_CAPS_IS_SIMPLE(frame_caps))
         return false;
-    GST_LOG("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
+    if (dcvOptDebug) g_print("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
 
     GstStructure* structure = gst_caps_get_structure(frame_caps, 0);  // no lifetime transfer
 
@@ -219,7 +220,7 @@ static gboolean determineFrameDims(Size *sz, gint* channels, bool* isOutputByteB
     {
         CV_Error_(Error::StsNotImplemented, ("Unsupported GStreamer layer type: %s", name.c_str()));
     }
-    GST_INFO("Channels=%d sz.height=%d sz.width=%d\n",*channels,sz->height,sz->width) ;
+    if (dcvOptDebug) g_print("Channels=%d sz.height=%d sz.width=%d\n",*channels,sz->height,sz->width) ;
     return true;
 }
 
@@ -293,6 +294,7 @@ void toFraction(const double decimal, int &numerator_i, int &denominator_i)
 	
 using namespace cv;
 using namespace std;
+void putFrameNum(Mat img, int fno) ;
 #include <vector>
 	/** Write a vector of points to an output array and vice versa **/
 int writeToArray(vector<Point2f> vlist, char *op, int opsize)
@@ -388,7 +390,7 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 			pointsg.resize(0) ;
 			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 		}
-		g_print("Stage1:return %d bytes\n",size) ;
+		if (dcvOptDebug) g_print("Stage1:return %d bytes\n",size) ;
 
 	}
 	return size;
@@ -405,33 +407,21 @@ int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasi
 	int nitems;
 	int i,size=0;
 	const int MAX_COUNT = 500 ;
+	static int fno=0;
 	
         cvtColor(img, gray, COLOR_BGR2GRAY);
 	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
 	cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
 #if 0
-	if (size >0 && ( (nitems = readFromBuffer(pointlist,pointsize, &points1)) == -1)) {
-	       g_print("Read from buffer empty\n")	;
-	       return -1 ;
-	}
-	else if (nitems == 0) g_print("No new points, please carry on using old points\n") ;
-	else if (!points1.empty())
-        {
-		int i,k;
-            for( i = k = 0; i < points1.size(); i++ )
-            {
-                circle( img, points1[i], 3, Scalar(128,128,0), -1, 8);
-            }
-	    size = writeToArray(points1, (char *)pointlist, outdatasize) ;
-	}
 #endif
         for( i = 0; i < pointsg.size(); i++ )
         {
               circle( img, pointsg[i], 4, Scalar(128,128,0), -1, 8);
         }
+	putFrameNum(img, ++fno) ;
 	size = 0 ;
 	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
-	g_print("Stagen:return %d bytes\n",size) ;
+	if (dcvOptDebug) g_print("Stagen:return %d bytes\n",size) ;
 //imshow...	
 	return size;
 }
@@ -445,20 +435,21 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 	static Mat gray;
 	static Mat prevGray ;
 	int nitems;
+	static int fno = 0 ;
 	
         cvtColor(img, gray, COLOR_BGR2GRAY);
 	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, &points1)) == -1)) {
 	       g_print("Read from buffer failed\n")	;
 	       return -1 ;
 	}
-	else if (nitems == 0) g_print("No new points, please carry on using old points\n") ;
+	else if (nitems == 0) if (dcvOptDebug) g_print("No new points, please carry on using old points\n") ;
 	if (!points0.empty())
         {
 		if(prevGray.empty())
 			img.copyTo(prevGray);
             calcOpticalFlowPyrLK(prevGray, gray, points0, points1, status, err, winSize,
                                  3, termcrit, 0, 0.001);
-	    g_print("Optical flow computed\n") ;
+	    if (dcvOptDebug) g_print("Optical flow computed\n") ;
             size_t i, k;
             for( i = k = 0; i < points1.size(); i++ )
             {
@@ -466,7 +457,6 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
                     continue;
 	
                 points1[k++] = points1[i];
-//                circle( img, points1[i], 3, Scalar(0,255,0), -1, 8);
                 {
             		int line_thickness = 4;
 			/* CV_RGB(red, green, blue) is the red, green, and blue components
@@ -500,10 +490,34 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
             }
             points1.resize(k);
 	}
+	putFrameNum(img,++fno) ;
 //imshow...	
 	swap(points1, points0);
 	swap(prevGray, gray);
 	return 0;
+}
+
+void putFrameNum(Mat img, int fno)
+{
+	char text[24] ;
+	int fontFace = FONT_HERSHEY_SCRIPT_SIMPLEX;
+	double fontScale = 2;
+	int thickness = 3;
+	int baseline=0;
+	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
+	baseline += thickness;
+// center the text
+	Point textOrg((img.cols - textSize.width)/2, (img.rows + textSize.height)/2);
+
+// draw the box
+	rectangle(img, textOrg + Point(0, baseline), textOrg + Point(textSize.width, -textSize.height), Scalar(0,0,255));
+
+// ... and the baseline first
+	line(img, textOrg + Point(0, thickness), textOrg + Point(textSize.width, thickness), Scalar(0, 0, 255));
+
+// then put the text itself
+	sprintf(text,"fno=%d",fno) ;
+	putText(img, text, textOrg, fontFace, fontScale, Scalar::all(255), thickness, 8);
 }
 	
 /** Main platform functions **/
@@ -538,7 +552,7 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 	else {
 		size = stage(img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
 	}
-	g_print("Stage fn writes %d bytes\n",size) ;
+	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
 	
 	if (size > 0)
 	{

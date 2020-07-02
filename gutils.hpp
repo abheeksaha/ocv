@@ -72,6 +72,7 @@ gboolean listenToBus(GstElement *pipeline, GstState * cstate, GstState *ostate, 
 void testStats(GstElement *tst) ;
 GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d) ;
 GstFlowReturn sink_newsample(GstAppSink *slf, gpointer d) ;
+GstFlowReturn sink_trypullsample(GstAppSink *slf, dcv_bufq_t *d) ;
 void walkPipeline(GstElement *p, guint level) ;
 void dataFrameWrite(GstAppSrc *s, guint length, gpointer data) ;
 void dataFrameStop(GstAppSrc *s,  gpointer data) ;

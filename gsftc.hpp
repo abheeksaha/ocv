@@ -20,6 +20,8 @@ typedef struct {
 	sockaddr_in cli_addr ;
 	sockaddr_in serv_addr;
 	sockaddr_in dstaddr ;
+	int sentbytes ;
+	int recvbytes ;
 	int insock;
 	int outsock;
 	int servsock;
@@ -27,6 +29,7 @@ typedef struct {
 	int seqExpected;
 	GstClock *pclk ;
 	GMutex lock ;
+	GMutex sendlock ;
 }dcv_ftc_t ;
 
 gboolean dcvFtConnStart(dcv_ftc_t *D) ;

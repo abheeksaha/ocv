@@ -22,7 +22,7 @@
 
 #include <unistd.h>
 
-extern int dcvFtcDebug ;
+int dcvFtcDebug ;
 dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddress, unsigned short outport)
 {
 	dcv_ftc_t *D = malloc(sizeof(dcv_ftc_t)) ;
@@ -35,7 +35,10 @@ dcv_ftc_t * dcvFtConnInit(char *inaddress, unsigned short inport, char *outaddre
 	D->seqExpected = -1 ;
 	D->servsock = -1 ;
 	D->outsock = -1 ;
+	D->sentbytes = 0;
+	D->recvbytes = 0;
 	g_mutex_init(&D->lock) ;
+	g_mutex_init(&D->sendlock) ;
 	if (inaddress != NULL) {
 		g_print("inport:%d\n",inport) ;
 		if ( (D->servsock = socket(AF_INET,SOCK_STREAM,0)) < 0) {
@@ -117,6 +120,7 @@ void dcvFtConnClose(dcv_ftc_t *D)
 	if (D->outsock != -1) close(D->outsock) ;
 	if (D->insock != -1) close(D->insock) ;
 	if (D->servsock != -1) close(D->servsock) ;
+	g_print("Conn close: sent=%d\n",D->sentbytes) ;
 }
 
 gchar *eosToString(gboolean eos)
@@ -159,12 +163,24 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 	guint64 avlbytes = dcvBufferedBytes(D) ;
 	if (maxbytes == 0) return maxbytes;
-	if (avlbytes < SIZEOFFRAMEHDR) return -1 ;
+	if (avlbytes < SIZEOFFRAMEHDR) { 
+		if (dcvFtcDebug) g_print("dcvPushBuffered:Don't even have a frame header avlbytes=%d\n",avlbytes) ; 
+		return -1 ; 
+	}
 	bsize = pfh[SZOFFSET] ;
 	if (dcvFtcDebug & 0x03) 
-		g_print("dcvPushBuffered:Bsize=%d Time=%d.%d sequence=%d maxbytes=%d availbytes=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET], maxbytes, avlbytes) ;
-	if ( bsize   > maxbytes) { return 0; }
-	if ( bsize >  (D->totalbytes - D->spaceleft)) { return -1; }
+		g_print("dcvPushBuffered:Bsize=%d Time=%d.%d sequence=%d maxbytes=%d availbytes=%d\n",
+				pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET], maxbytes, avlbytes) ;
+	if ( bsize   > maxbytes) { 
+		if (dcvFtcDebug & 0x03) 
+			g_print("dcvPushBuffered:Insufficient space in %s:needed=%d avail=%d\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(slf)), bsize, maxbytes) ; 
+		return 0; 
+	}
+	if ( bsize >  (D->totalbytes - D->spaceleft)) { 
+		if (dcvFtcDebug & 0x03)
+			g_print("dcvPushBuffered:buffer size (%d) too large for usrc space avail (%d)\n", bsize,D->totalbytes - D->spaceleft) ; 
+		return -2; 
+	}
 	if (pfh[UWOFFSET] != uw) donothing() ;
 	if (D->seqExpected != -1) {
 		g_assert(pfh[SEQOFFSET] == D->seqExpected) ;
@@ -180,7 +196,7 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 	}
 	GstBuffer * gb = gst_buffer_new_allocate(NULL,bsize,NULL) ;
 	if (gb == NULL ) {
-		GST_ERROR("Ran out of buffers in the pool!\n") ; 
+		g_print("Ran out of buffers in the pool!\n") ; 
 		g_assert(gb) ;
 	}
 	if (dcvFtcDebug & 0x03) 
@@ -218,13 +234,13 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 }
 int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 {
-	int nbytes,tbytes=0 ;
+	int nbytes,tbytes=0,tpbytes=0 ;
 	gboolean forceflush=TRUE ;
 	int flags = MSG_DONTWAIT ;
 	if (dcvIsDataBuffered(D)) flags = MSG_DONTWAIT ;
 	guint64 maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 	if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Starting with maxbytes=%u, space avail=%u pfinished=%d\n",maxbytes,D->spaceleft,*pfinished) ;
-	while (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
+	if (maxbytes > 0 || (D->spaceleft > 0 && *pfinished == FALSE)) {
 		while ( D->spaceleft > 0 && *pfinished == FALSE) {
 			nbytes = recv(D->insock,D->pbuf,D->spaceleft,flags) ;
 		/** See how much space there is in the array **/
@@ -232,22 +248,29 @@ int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 				if (dcvFtcDebug) g_print("Connection closed!\n") ;
 				forceflush = TRUE ;
 				*pfinished = TRUE ;
+				g_print("Connection closed: total recieved bytes = %d\n",D->recvbytes) ;
 			}
 			else if (nbytes != -1){
 				tbytes += nbytes ;
 				D->pbuf += nbytes;
 				D->spaceleft -= nbytes ;
-				if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
+				D->recvbytes += nbytes ;
+				if (dcvFtcDebug & 0x03) 
+					g_print("dcvPullBytesFromNet: Received %d bytes, spaceleft=%d\n",nbytes,D->spaceleft) ;
 				if (maxbytes > 0) break ;
 			}
-			else 
+			else {
 				usleep(1000) ;
+				break ;
+			}
 		}
 		if (maxbytes > 0)
 		{
-			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Trying to push %d bytes\n",maxbytes) ;
+			if (dcvFtcDebug & 0x03) 
+				g_print("dcvPullBytesFromNet: Trying to push %d bytes\n",tbytes) ;
 			int pushedbytes = dcvPushBuffered(slf,D) ;
-			if (dcvFtcDebug & 0x03) g_print("dcvPullBytesFromNet: Pushed %d bytes\n",pushedbytes) ;
+			if (dcvFtcDebug & 0x03) 
+				g_print("dcvPullBytesFromNet: Pushed %d bytes\n",pushedbytes) ;
 			if (pushedbytes == 0) {
 				return (tbytes > 0 ? -tbytes:-1) ;
 			}
@@ -255,13 +278,17 @@ int dcvPullBytesFromNet(GstAppSrc *slf, dcv_ftc_t *D, gboolean *pfinished)
 			/** More data required **/
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
 				if (*pfinished == TRUE) return tbytes ;
-				else continue ;
+	//			else continue ;
+			}
+			else if (pushedbytes == -2) {
+				usleep(1000) ;
+				return tpbytes;
 			}
 			else
 			{
 				maxbytes = gst_app_src_get_max_bytes(slf) - gst_app_src_get_current_level_bytes(slf) ;
-				tbytes += pushedbytes ;
-				return tbytes ;
+				tpbytes += pushedbytes ;
+				return tpbytes ;
 			}
 		}
 	}
@@ -314,6 +341,7 @@ GstFlowReturn dcvAppSinkNewSample(GstAppSink *slf, gpointer d)
 				retval= GST_FLOW_OK;
 			else 
 				retval= GST_FLOW_ERROR;
+			g_assert(retval == GST_FLOW_OK) ;
 		}
 		else 
 		{
@@ -341,15 +369,17 @@ void dcvEosRcvd(GstAppSink *slf, gpointer d)
 gboolean dcvSendBuffer (GstBuffer *b, gpointer d)
 {
 	dcv_ftc_t *D = (dcv_ftc_t *)d ;
-	static char framehead[SIZEOFFRAMEHDR] ;
+	static char framehead[SIZEOFFRAMEHDR+1024000] ;
 	unsigned int *pfh = (unsigned int *)framehead ;
 	struct timeval tv;
 	struct timezone tz;
 	unsigned int ptm;
+	char *pframehead = &framehead[SIZEOFFRAMEHDR];
 	GstMemory *bmem;
 	GstMapInfo bmap;
+	g_mutex_lock(&D->sendlock) ;
 	bmem = gst_buffer_get_all_memory(b) ;
-	if (gst_memory_map(bmem, &bmap, GST_MAP_READ) != TRUE) { GST_ERROR("Couldn't map memory in send buffer\n") ; }
+	if (gst_memory_map(bmem, &bmap, GST_MAP_READ) != TRUE) { g_print("Couldn't map memory in send buffer\n") ; }
 	gboolean rval = TRUE ;
 	pfh[UWOFFSET] = uw ; /** First 32 bits **/
 	pfh[SEQOFFSET] = D->sequence++ ; /** Next 32 bits **/
@@ -357,17 +387,36 @@ gboolean dcvSendBuffer (GstBuffer *b, gpointer d)
 	pfh[TMOFFSET] = tv.tv_usec & 0xffff ;
 	pfh[TMOFFSET] |= (tv.tv_sec & 0xffff) << 16 ;
 	pfh[SZOFFSET] = (unsigned int)bmap.size;
-	if (dcvFtcDebug & 0x03) g_print("dcvSendBuffer:Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;
-	if ( send(D->outsock,framehead,SIZEOFFRAMEHDR, MSG_MORE) == -1) {
-		return FALSE ;	
-	}
+	if (dcvFtcDebug & 0x03) 
+		g_print("dcvSendBuffer:Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;
 
-	if ( (send(D->outsock, (void *)bmap.data,(int)bmap.size,0)) == -1) { 
-		GST_ERROR("Couldn;t map buffer for sending\n") ;
-		rval = FALSE ;
-	}
-	if (dcvFtcDebug) g_print("Seq %u: sending %u bytes at %u.%u, rval=%d\n",D->sequence-1, bmap.size, tv.tv_sec,tv.tv_usec,rval) ;
+	memcpy(pframehead,bmap.data,bmap.size) ;
 	gst_memory_unmap(bmem,&bmap) ;
+	{
+		gint tosend = SIZEOFFRAMEHDR+bmap.size;
+		gint tbsent = 0 ;
+		pframehead = framehead ;
+		if (dcvFtcDebug) 
+			g_print("dcvSendBuffer: Seq %u: sending %u bytes at %u.%u, rval=%d\n",D->sequence-1, tosend, tv.tv_sec,tv.tv_usec,rval) ;
+		do {
+			tbsent = send(D->outsock,pframehead,tosend,0) ;
+			if (tbsent > 0) {
+				tosend -= tbsent ;
+				pframehead = &pframehead[tbsent] ;
+				D->sentbytes += tbsent ;
+			}
+			else {
+				rval = FALSE ;
+				break ;
+			}
+			usleep(1000) ;
+		} while (tosend > 0 && rval == TRUE) ;
+		if (dcvFtcDebug) 
+			g_print("dcvSendBuffer: Seq %u: sent %u bytes at %u.%u, rval=%d\n",D->sequence-1, D->sentbytes, tv.tv_sec,tv.tv_usec,rval) ;
+
+		if (rval == FALSE) g_print("Couldn't send buffer ,%d bytes left\n",tosend) ;
+	}
+	g_mutex_unlock(&D->sendlock) ;
 	return rval ;
 }
 
