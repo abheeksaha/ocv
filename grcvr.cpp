@@ -339,14 +339,19 @@ int main( int argc, char** argv )
 			guint64 *pd;
 			int bpushed ;
 			while (dcvQueuesLoaded(&D, grcvrMode))
-					vbufsnt += dcvProcessQueues(&D,grcvrMode,vbufsnt,localdisplay) ;
+			{
+				int vfp = 0 ;
+				vfp = dcvProcessQueues(&D,grcvrMode,vbufsnt,localdisplay) ;
+				if (vfp) g_print("Bytes received:%d\n", D.ftc->recvbytes) ;
+			}
 	
 			if (D.usrcstate.state == G_WAITING) {
 				if (D.usrcstate.finished != TRUE) {
 					static int lastbpushed = 0 ;
 					bpushed = dcvPullBytesFromNet(D.usrc,D.ftc,&D.usrcstate.finished) ;
 					if (bpushed != -1 || lastbpushed != -1) 
-						g_print("dcvPullBytesFromNet:Pulled %d bytes vq=%d dq=%d\n",bpushed,
+						if (dcvFtcDebug)
+							g_print("dcvPullBytesFromNet:Pulled %d bytes vq=%d dq=%d\n",bpushed,
 						      g_queue_get_length(D.videoframequeue.bufq),
 						     g_queue_get_length(D.olddataqueue.bufq) ) ;
 					lastbpushed = bpushed ;
@@ -359,6 +364,7 @@ int main( int argc, char** argv )
 #endif
 					if (D.usrcstate.finished == TRUE) {
 						g_print("End of stream achieved, usrc state=%d\n",D.usrcstate.state) ;
+						dcvFtcDebug=3 ;
 					}
 				}
 				else if (dcvIsDataBuffered(D.ftc)){ /** Connection closed from sender side, try and clear out the packets **/
@@ -383,7 +389,6 @@ int main( int argc, char** argv )
 					}
 				}
 			}
-			g_print("..\n");
 			while (dcvIsDataBuffered(D.ftc) && D.usrcstate.state == G_WAITING) {
 				int bpushed ;
 				if (dcvFtcDebug) g_print("%d bytes pending after end of cycle (state=%d)\n",dcvBufferedBytes(D.ftc),D.usrcstate.state) ; 
@@ -399,7 +404,6 @@ int main( int argc, char** argv )
 				continue ;
 			}
 			
-			g_print("++\n");
 			if (grcvrMode == GRCVR_INTERMEDIATE && D.dsrcstate.state != G_WAITING) continue ;
 			else if (D.usrcstate.state != G_WAITING) continue ;
 			if (g_queue_is_empty(D.videoframequeue.bufq) && D.eos[EOS_VSINK]) {

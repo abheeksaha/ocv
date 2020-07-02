@@ -157,6 +157,7 @@ int main( int argc, char** argv )
 	char videofile[1024] ; 
 	static dcvFrameData_t Dv ;
 	int numDataFrames=0;
+	int eosstage = 0;
 	gboolean vdispEos = false ;
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
@@ -403,6 +404,7 @@ int main( int argc, char** argv )
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 						g_print("Pushing data buffer number %d...(ret=%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
 								++numDataFrames, ret,g_queue_get_length(D.dq.bufq),D.eos[EOS_DSRC], D.eos[EOS_USINK], D.eos[EOS_VDISP], D.eos[EOS_VSINK]) ;
+						g_print("Bytes sent:%d\n", D.ftc->sentbytes) ;
 					}
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
@@ -429,20 +431,27 @@ int main( int argc, char** argv )
 				notprocessed = 0 ;
 			}
 		if  (D.eos[EOS_VSINK] == true) {
-			g_print("Received eos on vsink.newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
+			if (eosstage == 0)
+				g_print("Received eos on vsink.newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
 			if (dcvIsDataBuffered(D.ftc) > 0) {
 				g_print("Got pending data:%d\n", dcvBufferedBytes(D.ftc)) ;
+				if (eosstage > 0) eosstage-- ;
 			}
-			g_print("Received eos on vsink... and all clear\n") ;
+			else if (eosstage < 1)
+			{
+				eosstage++ ;
+				g_print("Received eos on vsink... and all clear\n") ;
+				dcvFtcDebug = 3 ;
+			}
 			if (D.dsrcstate.state != G_WAITING) continue ;
 			else if (D.eos[EOS_USRC] == false && D.eosSent[EOS_USRC] == false)
 			{
-				gst_app_src_end_of_stream(D.dsrc) ;
+				//gst_app_src_end_of_stream(D.dsrc) ;
 				D.eosSent[EOS_USRC] = true ;
+				eosstage++ ;
 			}
 			else
 			{
-				terminate = TRUE ;
 			}
 		}
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;

@@ -27,6 +27,5 @@ gdyn: gdyn.o gsftc.o gutils.o dsopencv.o $(DEPFILES)
 grcvr : grcvr.o gutils.o gsftc.o dsopencv.o $(DEPFILES)
 	$(LDCPP) -o $@ grcvr.o gutils.o gsftc.o dsopencv.o $(LDFLAGS) -lopencv_world  -lm
 
-
-lkdemo: lkdemo.o dsopencv.o
-	$(LDCPP) -o $@ lkdemo.o  dsopencv.o $(LDFLAGS) -lopencv_world -lm
+server: server.o
+	$(LD) -o $@ server.o
