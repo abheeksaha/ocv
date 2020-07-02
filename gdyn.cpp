@@ -12,7 +12,8 @@
 #include "dsopencv.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison> -l (local display) -w (to wait for signal)\n",name) ;  
+	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
+		       	-l (local display) -e|--intel-edge \n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -33,7 +34,6 @@ typedef struct {
 	gboolean eos[MAX_EOS_TYPES];
 	gboolean eosSent[MAX_EOS_TYPES];
 	GstElement *fsrc ;
-	GstCaps *vcaps, *dcaps ;
 	unsigned long vsinkq;
 	dcv_bufq_t dq;
 	dcv_ftc_t *ftc;
@@ -75,25 +75,11 @@ static char ndesc[] = "rtpbin name=rbin \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
-std::string sdesc = "udpsrc name=usrc address= port=50017 ! queue ! application/x-rtp,media=video,clock-rate=90000,encoding-name=VP9 ! rtpvp9depay ! queue ! tee name=tpoint \
-                          rtpmux name=mux ! queue ! appsink  name=usink \
-                          tpoint.src_0 ! queue ! vp9dec name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
-                          tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
-                          appsrc name=vdisp ! video/x-raw,height=480,width=848,format=BGR ! %s \
-                          appsrc name=dsrc ! queue ! application/x-rtp,media=application,clock-rate=20000,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+/*search if  ip address is assigned to the kni interface*/
 
-/*signal handler for edge node */
-void handle_signal(int sig)
+char * findIpaddress()
 {
-	g_print("sigusr received \n");
-	wait_for_signal = 0;
-
-}
-
-char * addEdgeIpaddressTopdesc()
-{
-	char self_ip[20];
-	memset(self_ip,"\0",20);
+	char * self_ip=NULL;
 	struct if_nameindex *if_nid, *intf;
 	char if_name[20],*p;
 	if_nid = if_nameindex();
@@ -107,7 +93,6 @@ char * addEdgeIpaddressTopdesc()
 				strcpy(if_name,intf->if_name);
 			}
 		}
-
 		if_freenameindex(if_nid);
 	}
 	g_print("kni interface %s \n",if_name);
@@ -115,24 +100,20 @@ char * addEdgeIpaddressTopdesc()
 	int fd;
 	struct ifreq ifr;
 	char int_name[20];
-	fd = socket(AF_INET, SOCK_DGRAM, 0);
 
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
 	ifr.ifr_addr.sa_family = AF_INET;
 	strncpy(ifr.ifr_name, if_name, IFNAMSIZ-1);
-	ioctl(fd, SIOCGIFADDR, &ifr);
-	close(fd);
-	/*getting ip address of kni interface*/
-	strcpy(self_ip,inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
-	g_print("ip address=%s \n",self_ip);
-
-	std::string s1;
-	s1="address=";
-	size_t pos1 = sdesc.find(s1);
-	if (pos1 != std::string::npos)
-		sdesc.insert(pos1 + s1.size(), self_ip);
-	const char *srcfinal = sdesc.c_str();
-	return srcfinal;
-
+	if(ioctl(fd, SIOCGIFADDR, &ifr) >=0)
+	{
+		self_ip = inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+		g_print("ip address=%s \n",self_ip);
+		close(fd);
+		return self_ip;
+	}
+	else
+		close(fd);
+	return NULL;
 }
 
 int main( int argc, char** argv )
@@ -147,7 +128,6 @@ int main( int argc, char** argv )
 	char pipedesc[8192];
 	char *pdesc = fdesc;
 	gboolean inputfromnet=FALSE ;
-	gboolean waitflag=FALSE ;
 	guint txport = 50018;
 	guint rxport = 0;
 	gboolean dotx = TRUE ;
@@ -159,23 +139,26 @@ int main( int argc, char** argv )
 	int numDataFrames=0;
 	int eosstage = 0;
 	gboolean vdispEos = false ;
+	gboolean intel_platform= false;
+
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
-	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
-	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
+//	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
+//	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	static struct option longOpts[] = {
 		{ "help", no_argument, 0, 'h' },
 		{ "localDisplay", required_argument, 0, 'l' },
 		{ "debug", required_argument, 0, 'd' },
+		{ "intel-edge", no_argument, 0, 'e' },
 		{ 0,0,0,0 }} ;
 	int longindex;
 	dcvFtcDebug=0 ;
 	dcvGstDebug=0 ;
+	char * ip_address=NULL;
 
 	/*registering signal handler*/
-        signal(SIGUSR1, handle_signal);
 
-	while ((ch = getopt_long(argc, argv, "p:i:f:hn:lw",longOpts,&longindex)) != -1) {
+	while ((ch = getopt_long(argc, argv, "p:i:f:hn:le",longOpts,&longindex)) != -1) {
 		if (ch == 'p')
 		{
 			txport = atoi(optarg) ; g_print("Setting txport\n") ; 
@@ -186,21 +169,27 @@ int main( int argc, char** argv )
 		if (ch == 'n') { inputfromnet=TRUE; pdesc = ndesc ; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
 		if (ch == 'd') { dcvFtcDebug = atoi(optarg) & 0x03 ; dcvGstDebug = (atoi(optarg) >> 2) & 0x03 ;  }
-		if (ch == 'w') { waitflag=TRUE;  }
-
+		if (ch == 'e')
+                {
+			intel_platform=TRUE;
+		}
 	}
-
-	/* check if application needs to wait for signal in case of intel edgenode*/
-	if(TRUE == waitflag )
+	/* check if application is running on  intel edgenode*/
+	if(TRUE == intel_platform )
 	{
-		/*waiting for sigusr signal*/
-		while(wait_for_signal)
+		g_print("Intel Platform Flag set\n") ;
+		/*waiting for ipaddress*/
+		while(1)
 		{
-			g_print("waiting for signal .....\n");
+			ip_address=findIpaddress();
+			if(ip_address!=NULL)
+			{	
+				g_print("ip addr is %s \n",ip_address);
+				break;
+			}
+			g_print("waiting for ip address to be assigned to kni interface .....\n");
 			sleep(5);
 		}
-		/*calling function to add kni interface ip address in gst pipeline */
-		pdesc=addEdgeIpaddressTopdesc();
 	}
 
 	gst_init(&argc, &argv) ;
@@ -257,6 +246,8 @@ int main( int argc, char** argv )
 		D.fsrc = gst_bin_get_by_name(GST_BIN(D.pipeline),"usrc") ;
 		g_assert(D.fsrc) ;
 		g_object_set(G_OBJECT(D.fsrc),"port", rxport, NULL) ; 
+		if (ip_address != NULL)
+			g_object_set(G_OBJECT(D.fsrc),"address", ip_address, NULL) ; 
 		D.rtpvp9dp = gst_bin_get_by_name(GST_BIN(D.pipeline),"rtpvp9dp") ;
 		g_assert(D.rtpvp9dp) ;
 		GstElement *rbin = gst_bin_get_by_name(GST_BIN(D.pipeline),"rbin") ;
