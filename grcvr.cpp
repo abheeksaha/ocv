@@ -64,18 +64,18 @@ gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static char termdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue ! rtpvp9depay name=vp9d ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
+rpdmx.src_96 ! queue ! rtph264depay name=vp9d ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
 appsrc name=vdisp ! queue ! video/x-raw,format=BGR ! %s";
 
 static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue name=q1 ! rtpvp9depay name=vp9d ! tee name=tpoint \
+rpdmx.src_96 ! queue name=q1 ! rtph264depay name=vp9d ! tee name=tpoint \
 rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! appsink name=dsink \
-tpoint.src_0 ! queue name=q3 ! avdec_vp9 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+tpoint.src_0 ! queue name=q3 ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 rtpmux name=mux !  queue ! appsink name=usink \
 appsrc name=vdisp ! queue name=q5 ! video/x-raw,format=BGR ! %s \
-tpoint.src_1 ! queue name=q6 ! rtpvp9pay ! mux.sink_0 \
+tpoint.src_1 ! queue name=q6 ! rtph264pay ! mux.sink_0 \
 appsrc name=dsrc ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
 
 typedef enum {
@@ -201,7 +201,7 @@ int main( int argc, char** argv )
 		D.ftc->pclk = NULL ;
 
 	gerr = NULL ;
-	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
+	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "H264", NULL);
 	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.dsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsink")) ;
@@ -221,7 +221,7 @@ int main( int argc, char** argv )
 				g_printerr("No sink pad for vbin\n") ; 
 			}
 			cps = gst_pad_query_caps(pad,NULL) ;
-			g_print("VP9 Depay can handle:%s\n", gst_caps_to_string(cps)) ;
+			g_print("H264 Depay can handle:%s\n", gst_caps_to_string(cps)) ;
 			gst_pad_set_caps(pad,D.vcaps) ;
 		}
 #if 0

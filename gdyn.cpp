@@ -12,7 +12,7 @@
 #include "dsopencv.hpp"
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, webm format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
+	g_print("Usage: %s -f <input file, mp4 format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
 		       	-l (local display) -e|--intel-edge \n",name) ;  
 }
 
@@ -20,6 +20,7 @@ static void processbuffer(void *A, int isz, void *B, int osz) ;
 typedef struct {
 	GstElement *pipeline;
 	GstElement *tpt;
+	GstElement *vparse;
 	GstElement *mdmx;
 	GstElement *usink;
 	GstAppSink *vsink;
@@ -60,18 +61,18 @@ extern void walkPipeline(GstBin *bin) ;
 
 volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
-static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! tee name=tpoint \
+static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! h264parse name=vparse ! video/x-h264,stream-format=byte-stream ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink name=usink \
-			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
-			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
+			  tpoint.src_0 ! queue ! avdec_h264 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
+			  tpoint.src_1 ! queue ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
-		       rtpvp9depay name=rtpvp9dp ! queue ! tee name=tpoint \
+		       rtph264depay name=rtpvp9dp ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
-			  tpoint.src_0 ! queue ! avdec_vp9 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
-			  tpoint.src_1 ! queue ! rtpvp9pay name=vppy ! mux.sink_0 \
+			  tpoint.src_0 ! queue ! avdec_h264 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+			  tpoint.src_1 ! queue ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
@@ -143,8 +144,6 @@ int main( int argc, char** argv )
 
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
-//	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
-//	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	static struct option longOpts[] = {
 		{ "help", no_argument, 0, 'h' },
 		{ "localDisplay", required_argument, 0, 'l' },
@@ -234,7 +233,12 @@ int main( int argc, char** argv )
 	dcvBufQInit(&D.dq) ;
 	D.dsrcstate.state = G_BLOCKED;
 	D.dsrcstate.length = 0;
-	if (D.mdmx) g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
+	if (D.mdmx) 
+	{
+		D.vparse = gst_bin_get_by_name(GST_BIN(D.pipeline),"vparse") ;
+		g_assert(D.vparse) ;
+		g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.vparse) ;
+	}
 
 	if (inputfromnet == FALSE) {
 		D.fsrc = gst_bin_get_by_name(GST_BIN(D.pipeline),"fsrc") ;
@@ -278,9 +282,7 @@ int main( int argc, char** argv )
 			t = gst_pad_query_caps(rtpsink1,NULL) ;
 			u = gst_pad_query_caps(rtpsink2,NULL) ;
 			g_print("rtpsink1 likes caps: %s\n", gst_caps_to_string(t)) ;
-//			gst_pad_set_caps(rtpsink1, gst_caps_new_simple ("application/x-rtp", NULL)) ;
 			g_print("rtpsink2 likes caps: %s\n", gst_caps_to_string(u)) ;
-//			gst_pad_set_caps(rtpsink2,gst_caps_new_simple ("application/x-rtp", NULL)) ;
 		}
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"vppy") ; g_assert(ge) ;
@@ -455,7 +457,7 @@ static GstCaps * rtpbinPtAdded(GstElement *rbin, guint ssrc, guint pt, gpointer 
 	g_print("Pt added for ssrc%d pt%d\n",ssrc,pt) ;
 	GstCaps *ptcaps = gst_caps_new_simple ("application/x-rtp", 
 			"media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, 
-			"encoding-name", G_TYPE_STRING, "VP9", NULL);
+			"encoding-name", G_TYPE_STRING, "H264", NULL);
 	return  ptcaps ;
 }
 static void rtpbinPadAdded(GstElement *s, GstPad *p, gpointer *D)
@@ -484,7 +486,7 @@ static void rtpbinPadAdded(GstElement *s, GstPad *p, gpointer *D)
 		g_print("Unlinked rtp src pad\n") ;
 		dpipe_t *pD = (dpipe_t *)D ;
 		GstCaps * vcaps = gst_caps_new_simple (
-				"application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "VP9", NULL);
+				"application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "H264", NULL);
 		gst_pad_set_caps(p,vcaps) ;
 		peer = gst_element_get_static_pad(pD->rtpvp9dp,"sink") ;
 		g_assert(peer) ;
@@ -518,7 +520,7 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 	sinkpad = gst_element_get_static_pad(dec ,"sink") ;
 	t = gst_pad_query_caps(p,NULL) ;
 	u = gst_pad_query_caps(sinkpad,NULL) ;
-	g_print("Matching caps:%s to caps %s\n",gst_caps_to_string(t), gst_caps_to_string(u)) ;
+	g_print("Matching caps:%s \n\nto caps %s\n",gst_caps_to_string(t), gst_caps_to_string(u)) ;
 	if (gst_pad_get_peer(p) != NULL) {
 		g_print("%s:%s (p) linked to %s:%s\n",
 				GST_ELEMENT_NAME(gst_pad_get_parent_element(p)),GST_PAD_NAME(p),
