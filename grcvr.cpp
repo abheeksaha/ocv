@@ -64,18 +64,18 @@ gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static char termdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue ! rtph264depay name=vp9d ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
+rpdmx.src_96 ! queue ! rtph264depay name=vsd !  avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
 appsrc name=vdisp ! queue ! video/x-raw,format=BGR ! %s";
 
 static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue name=q1 ! rtph264depay name=vp9d ! tee name=tpoint \
+rpdmx.src_96 ! queue name=q1 ! rtph264depay name=vsd ! queue ! tee name=tpoint \
 rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! appsink name=dsink \
 tpoint.src_0 ! queue name=q3 ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 rtpmux name=mux !  queue ! appsink name=usink \
 appsrc name=vdisp ! queue name=q5 ! video/x-raw,format=BGR ! %s \
-tpoint.src_1 ! queue name=q6 ! rtph264pay ! mux.sink_0 \
+tpoint.src_1 ! queue ! h264parse ! video/x-h264,stream-format=byte-stream ! rtph264pay ! mux.sink_0 \
 appsrc name=dsrc ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
 
 typedef enum {
@@ -214,9 +214,9 @@ int main( int argc, char** argv )
 	/** Saving the depayloader pads **/
 	{
 		{
-			GstElement *vp9depay = gst_bin_get_by_name( GST_BIN(D.pipeline),"vp9d") ; 
+			GstElement *vsdepay = gst_bin_get_by_name( GST_BIN(D.pipeline),"vsd") ; 
 			GstCaps *cps;
-			GstPad * pad = gst_element_get_static_pad(vp9depay ,"sink") ;
+			GstPad * pad = gst_element_get_static_pad(vsdepay ,"sink") ;
 			if (pad == NULL) {
 				g_printerr("No sink pad for vbin\n") ; 
 			}

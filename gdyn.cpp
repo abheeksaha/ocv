@@ -29,8 +29,8 @@ typedef struct {
 	/* Output elements **/
 	GstElement *mux;
 	GstElement *op;
-	GstElement *vp9d;
-	GstElement *rtpvp9dp;
+	GstElement *vsd;
+	GstElement *rtpvsdp;
 	srcstate_t dsrcstate;
 	gboolean eos[MAX_EOS_TYPES];
 	gboolean eosSent[MAX_EOS_TYPES];
@@ -63,15 +63,15 @@ volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
 static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! h264parse name=vparse ! video/x-h264,stream-format=byte-stream ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink name=usink \
-			  tpoint.src_0 ! queue ! avdec_h264 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
+			  tpoint.src_0 ! queue ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
-		       rtph264depay name=rtpvp9dp ! queue ! tee name=tpoint \
+		       rtph264depay name=rtpvsdp ! h264parse name=vparse ! video/x-h264,stream-format=byte-stream ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
-			  tpoint.src_0 ! queue ! avdec_h264 name=vp9d ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+			  tpoint.src_0 ! queue ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
@@ -221,7 +221,7 @@ int main( int argc, char** argv )
 	}
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.tpt  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint") ;
-	D.vp9d  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vp9d") ;
+	D.vsd  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vsd") ;
 	if (inputfromnet == FALSE) D.mdmx  = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
 	else D.mdmx = NULL ;
 	for ( int i=0; i<MAX_EOS_TYPES; i++)
@@ -235,9 +235,13 @@ int main( int argc, char** argv )
 	D.dsrcstate.length = 0;
 	if (D.mdmx) 
 	{
+#if 1
 		D.vparse = gst_bin_get_by_name(GST_BIN(D.pipeline),"vparse") ;
 		g_assert(D.vparse) ;
 		g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.vparse) ;
+#else
+		g_signal_connect(D.mdmx, "pad-added", G_CALLBACK(muxpadAdded), D.tpt) ;
+#endif
 	}
 
 	if (inputfromnet == FALSE) {
@@ -252,8 +256,8 @@ int main( int argc, char** argv )
 		g_object_set(G_OBJECT(D.fsrc),"port", rxport, NULL) ; 
 		if (ip_address != NULL)
 			g_object_set(G_OBJECT(D.fsrc),"address", ip_address, NULL) ; 
-		D.rtpvp9dp = gst_bin_get_by_name(GST_BIN(D.pipeline),"rtpvp9dp") ;
-		g_assert(D.rtpvp9dp) ;
+		D.rtpvsdp = gst_bin_get_by_name(GST_BIN(D.pipeline),"rtpvsdp") ;
+		g_assert(D.rtpvsdp) ;
 		GstElement *rbin = gst_bin_get_by_name(GST_BIN(D.pipeline),"rbin") ;
 		g_assert(rbin) ;
 		g_object_set(G_OBJECT(rbin),"ignore-pt",false,NULL) ;
@@ -488,11 +492,11 @@ static void rtpbinPadAdded(GstElement *s, GstPad *p, gpointer *D)
 		GstCaps * vcaps = gst_caps_new_simple (
 				"application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "H264", NULL);
 		gst_pad_set_caps(p,vcaps) ;
-		peer = gst_element_get_static_pad(pD->rtpvp9dp,"sink") ;
+		peer = gst_element_get_static_pad(pD->rtpvsdp,"sink") ;
 		g_assert(peer) ;
 		GstPadLinkReturn ret = gst_pad_link(p,peer) ;
 		if (GST_PAD_LINK_FAILED(ret)) {
-			g_printerr("Couldn't link data to vp9d: ret=%d\n", ret) ;
+			g_printerr("Couldn't link data to vsd: ret=%d\n", ret) ;
 			if (ret == GST_PAD_LINK_WAS_LINKED) {
 				GstPad * ppeer = gst_pad_get_peer(peer) ;
 				g_print("Peer pad %s:%s is linked already to %s:%s\n",
