@@ -341,7 +341,6 @@ GstFlowReturn dcvAppSinkNewSample(GstAppSink *slf, gpointer d)
 				retval= GST_FLOW_OK;
 			else 
 				retval= GST_FLOW_ERROR;
-			g_assert(retval == GST_FLOW_OK) ;
 		}
 		else 
 		{
