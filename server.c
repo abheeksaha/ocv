@@ -12,42 +12,51 @@
 #include <errno.h>
 #include <unistd.h>
 
-void error(const char *msg)
+void help(const char *msg)
 {
-    perror(msg);
+    fprintf(stderr,msg);
     exit(1);
 }
 
 #define MAXBUFFERSIZE 32768
-int main(int argc, char *argv[])
+int main(int c, char **v)
 {
      int sockfd, newsockfd, portno;
      socklen_t clilen;
      char buffer[MAXBUFFERSIZE];
      struct sockaddr_in serv_addr, cli_addr;
      int n,bytesrcvd=0;
-     if (argc < 2) {
-         fprintf(stderr,"ERROR, no port provided\n");
-         exit(1);
+     char ch ;
+     extern char *optarg ;
+     portno = 50018;
+     
+     while ((ch = getopt(c,v,"r:h")) != -1) {
+	     switch(ch) {
+		     case 'h': {
+			help("server -r <port on which to listen:default 50018>\n") ;
+			exit(1) ;
+		    }
+			case 'r': portno = atoi(optarg) ; break ;
+	     }
      }
+
      sockfd = socket(AF_INET, SOCK_STREAM, 0);
      if (sockfd < 0) 
-        error("ERROR opening socket");
+        help("ERROR opening socket");
      bzero((char *) &serv_addr, sizeof(serv_addr));
-     portno = atoi(argv[1]);
      serv_addr.sin_family = AF_INET;
      serv_addr.sin_addr.s_addr = INADDR_ANY;
      serv_addr.sin_port = htons(portno);
      if (bind(sockfd, (struct sockaddr *) &serv_addr,
               sizeof(serv_addr)) < 0) 
-              error("ERROR on binding");
+              help("ERROR on binding");
      listen(sockfd,5);
      clilen = sizeof(cli_addr);
      newsockfd = accept(sockfd, 
                  (struct sockaddr *) &cli_addr, 
                  &clilen);
      if (newsockfd < 0) 
-          error("ERROR on accept");
+          help("ERROR on accept");
      bzero(buffer,MAXBUFFERSIZE);
      do {
      	n = recv(newsockfd,buffer,MAXBUFFERSIZE,MSG_DONTWAIT);

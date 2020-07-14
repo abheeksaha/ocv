@@ -196,19 +196,19 @@ gboolean dcvMatchBuffer(void *A, int osz, void *B, int isz)
 	tag_t *pd = (tag_t *)B ;
 	u32 hsh=0;
 	int sequence[1024];
-//	g_print("Seq of size %d: count(%u) tstmp=%u hash=%u: ", pd->seqsize,pd->count,pd->tstmp,pd->checksum)  ;
+	if (dcvGstDebug  & 0x02) g_print("dcvMatchB: Seq of size %d: count(%u) tstmp=%u hash=%u: ", pd->seqsize,pd->count,pd->tstmp,pd->checksum)  ;
 	g_assert(pd->seqsize < 1024) ;
 	g_assert(pd->seqsize == RSEQSIZE) ;
 	for (i=0; i<pd->seqsize; i++) {
 		sequence[i] = pd->seq[i] ;
-	//	g_print("pA[%u]=%u ",sequence[i],pA[sequence[i]]) ;
+		if (dcvGstDebug & 0x02) g_print("pA[%u]=%u ",sequence[i],pA[sequence[i]]) ;
 		hsh ^= pA[sequence[i]] ;
 	}
-//	g_print("Checksum = %u ..", hsh) ;
+	if (dcvGstDebug & 0x02) g_print("Checksum = %u ..", hsh) ;
 	hsh ^= pd->checksum ;
 	if (hsh == 0) { retval = TRUE ; }
 	else retval = FALSE ;
-//	g_print("hsh = %u (%s)\n", hsh, (hsh == 0? "match":"fail")) ;
+	if (dcvGstDebug & 0x02) g_print("hsh = %u (%s)\n", hsh, (hsh == 0? "match":"fail")) ;
 	return retval ;
 }
 
