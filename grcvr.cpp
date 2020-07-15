@@ -343,6 +343,8 @@ int main( int argc, char** argv )
 				int vfp = 0 ;
 				vfp = dcvProcessQueues(&D,grcvrMode,vbufsnt,localdisplay) ;
 				if (vfp) g_print("Bytes received:%d\n", D.ftc->recvbytes) ;
+				else 
+					break ;
 			}
 	
 			if (D.usrcstate.state == G_WAITING) {

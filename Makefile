@@ -29,3 +29,6 @@ grcvr : grcvr.o gutils.o gsftc.o dsopencv.o $(DEPFILES)
 
 server: server.o
 	$(LD) -o $@ server.o
+
+foe: foeTest.o foe.o
+	$(LD) -o $@ foeTest.o foe.o -lgsl -lgslcblas  -lm
