@@ -512,7 +512,7 @@ int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean 
 				g_print("Dropping data buffer, no match for too long\n") ;
 		}
 		else 
-			g_queue_push_tail(pd->olddataqueue.bufq,dataFrameContainer) ;
+			g_queue_push_head(pd->olddataqueue.bufq,dataFrameContainer) ;
 #endif
 		gettimeofday(&lastCheck,&tz) ;
 		g_print("Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
