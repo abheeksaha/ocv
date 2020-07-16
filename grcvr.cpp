@@ -108,6 +108,7 @@ int main( int argc, char** argv )
 	guint txport = 50020 ;
 	char ipaddress[45] = "192.168.1.71" ;
 	grcvr_mode_e grcvrMode = GRCVR_LAST ;
+	extern int strictCheck ;
 
 	int pktsout=0;
 	char clientipaddr[1024];
@@ -117,6 +118,7 @@ int main( int argc, char** argv )
 		{ "debug", optional_argument, 0, 'd' },
 		{ "recvport", required_argument, 0, 'r' },
 		{ "sendport", required_argument, 0, 'p' },
+		{ "strictcheck", no_argument, 0, 18 },
 		{ "sendaddr", required_argument, 0, 'i' },
 		{ "localDisplay", required_argument, 0, 'l' },
 		{ 0,0,0,0 }} ;
@@ -133,6 +135,9 @@ int main( int argc, char** argv )
 			g_print("mode switched to:%s\n",optarg) ; 
 			if (strncmp(optarg,"inter",5) == 0) { grcvrMode = GRCVR_INTERMEDIATE ; }
 			else if (strncmp(optarg,"first",5) == 0) { grcvrMode = GRCVR_FIRST ; }
+		}
+		else if (ch == 18) {
+			strictCheck = 1 ;
 		}
 		else if (ch == 'd') { 
 			int dbgFlags = 0 ;

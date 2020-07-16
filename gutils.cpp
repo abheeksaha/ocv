@@ -12,6 +12,7 @@
 bufferCounter_t inbc,outbc;
 extern gboolean terminate ;
 int dcvGstDebug ;
+int strictCheck = 0;
 
 gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD) ;
 
@@ -207,7 +208,8 @@ gboolean dcvMatchBuffer(void *A, int osz, void *B, int isz)
 	if (dcvGstDebug & 0x03) g_print("Checksum = %u ..", hsh) ;
 	hsh ^= pd->checksum ;
 	if (hsh == 0) { retval = TRUE ; }
-	else retval = FALSE ;
+	else if (strictCheck) retval = FALSE ;
+	else retval = TRUE ;
 	if (dcvGstDebug & 0x03) g_print("hsh = %u (%s)\n", hsh, (hsh == 0? "match":"fail")) ;
 	return retval ;
 }
