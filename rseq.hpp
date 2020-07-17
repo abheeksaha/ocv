@@ -19,6 +19,7 @@ static unsigned int rseq[] = {
 7640,
 } ;
 
+typedef unsigned int u32 ;
 typedef struct {
 	u32 count;
 	u32 tstmp;

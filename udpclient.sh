@@ -20,5 +20,5 @@ fi
 echo "Using destination=$destination port=$port file=$file";
 
 gst-launch-1.0 rtpbin name=rbin \
-	filesrc location=$file ! matroskademux ! h264parse ! video/x-h264,stream-format=byte-stream ! rtph264pay ! application/x-rtp,media=video,clock-rate=90000 ! rbin.send_rtp_sink_0 \
+	filesrc location=$file ! matroskademux ! parsebin ! rtph264pay ! application/x-rtp,media=video,clock-rate=90000 ! rbin.send_rtp_sink_0 \
 	rbin.send_rtp_src_0 ! udpsink host=$destination port=$port

@@ -16,6 +16,7 @@ typedef struct {
 	bool isOutputByteBuffer ;
 	int framerate ;
 	int num_frames ;
+	double avgProcessTime ;
 }  dcvFrameData_t ;
 
 typedef int (* dcvStageFn_t )(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatasize) ;

@@ -188,8 +188,8 @@ int dcvPushBuffered (GstAppSrc *slf, dcv_ftc_t *D)
 	}
 	else 
 		D->seqExpected = pfh[SEQOFFSET]+1 ;
-	tv.tv_usec = pfh[TMOFFSET] & 0xffff ;
-	tv.tv_sec = pfh[TMOFFSET] >> 16 ;
+	tv.tv_usec = pfh[TMOFFSET] & 0xfffff ;
+	tv.tv_sec = pfh[TMOFFSET] >> 20 ;
 	if (bsize > D->totalbytes)
 	{
 		g_assert(bsize < D->totalbytes) ;
@@ -383,8 +383,8 @@ gboolean dcvSendBuffer (GstBuffer *b, gpointer d)
 	pfh[UWOFFSET] = uw ; /** First 32 bits **/
 	pfh[SEQOFFSET] = D->sequence++ ; /** Next 32 bits **/
 	gettimeofday(&tv,&tz) ;
-	pfh[TMOFFSET] = tv.tv_usec & 0xffff ;
-	pfh[TMOFFSET] |= (tv.tv_sec & 0xffff) << 16 ;
+	pfh[TMOFFSET] = tv.tv_usec & 0xfffff ;
+	pfh[TMOFFSET] |= (tv.tv_sec & 0xfff) << 20 ;
 	pfh[SZOFFSET] = (unsigned int)bmap.size;
 	if (dcvFtcDebug & 0x03) 
 		g_print("dcvSendBuffer:Bsize=%d Time=%d.%d sequence=%d\n",pfh[SZOFFSET],pfh[TMOFFSET]>>16,pfh[TMOFFSET] & 0x00ffff, pfh[SEQOFFSET]) ;

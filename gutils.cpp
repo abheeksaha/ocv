@@ -5,8 +5,8 @@
 #include <gst/gst.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
-#include "gutils.hpp"
 #include "rseq.hpp"
+#include "gutils.hpp"
 
 
 bufferCounter_t inbc,outbc;
@@ -146,7 +146,7 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 	tag_t *pd = (tag_t *)B ;
 	pd->count = count++ ;
 	gettimeofday(&Tv,&tz) ;
-	pd->tstmp = Tv.tv_usec % (1<<30)  ;
+	pd->tstmp = ((Tv.tv_sec & (0x0FFF)) << 20) | (Tv.tv_usec & 0x000FFFFF)  ;
 	pd->seqsize =  RSEQSIZE ;
 	for (i=0; i<RSEQSIZE; i++) 
 		pd->seq[i] = rseq[i] ;
@@ -230,10 +230,9 @@ gint dcvMatchContainer (gconstpointer vq, gconstpointer tag )
 	else return 1 ;
 }
 
-int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d)
+int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d, tag_t *T)
 {
 	GList *p ;
-	tag_t T ;
 	int rval=-1 ;
 	if (q==NULL) goto GETOUT;
 	else
@@ -242,10 +241,11 @@ int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d)
 		GstMapInfo tmap;
 		tmem = gst_buffer_get_all_memory(d->nb) ;
 		if (gst_memory_map(tmem, &tmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
-		memcpy((void *)&T,tmap.data,sizeof(tag_t)) ;
-		if (dcvGstDebug) g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T.count,T.tstmp,T.seqsize) ;
+		memcpy((void *)T,tmap.data,sizeof(tag_t)) ;
+		g_print("Recevied Tag:count=%u tstmp=%u \n ", T->count,T->tstmp) ;
+		if (dcvGstDebug) g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T->count,T->tstmp,T->seqsize) ;
 
-		if ((p = g_queue_find_custom(q,(void *)&T,dcvMatchContainer)) == NULL) 
+		if ((p = g_queue_find_custom(q,(void *)T,dcvMatchContainer)) == NULL) 
 			rval = -1 ;
 		else
 			rval =  g_queue_link_index(q,p) ;

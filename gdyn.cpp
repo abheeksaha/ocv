@@ -1,19 +1,22 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 #include <gst/gst.h>
+#include <gst/gstdebugutils.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
 #include <plugins/elements/gsttee.h>
 
 #include "gsftc.hpp"
+#include "rseq.hpp"
 #include "gutils.hpp"
 #include "dsopencv.hpp"
 static void help(char *name)
 {
 	g_print("Usage: %s -f <input file, mp4 format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
-		       	-l (local display) -e|--intel-edge \n",name) ;  
+		       	-l (local display) -e|--intel-edge --graphdump <graphdumpfile> \n",name) ;  
 }
 
 static void processbuffer(void *A, int isz, void *B, int osz) ;
@@ -43,8 +46,6 @@ typedef struct {
 extern int dcvFtcDebug;
 extern int dcvGstDebug;
 #include <getopt.h>
-#include "gutils.hpp"
-#include "rseq.hpp"
 #include <signal.h>
 #include <string>
 #include <sys/ioctl.h>
@@ -61,18 +62,18 @@ extern void walkPipeline(GstBin *bin) ;
 
 volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
-static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! h264parse name=vparse ! video/x-h264,stream-format=byte-stream ! tee name=tpoint \
+static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink name=usink \
-			  tpoint.src_0 ! queue ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
-			  tpoint.src_1 ! queue ! rtph264pay name=vppy ! mux.sink_0 \
+			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
+			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
-		       rtph264depay name=rtpvsdp ! h264parse name=vparse ! video/x-h264,stream-format=byte-stream ! queue ! tee name=tpoint \
+		       rtph264depay name=rtpvsdp ! queue ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
-			  tpoint.src_0 ! queue ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
-			  tpoint.src_1 ! queue ! rtph264pay name=vppy ! mux.sink_0 \
+			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 
@@ -141,6 +142,8 @@ int main( int argc, char** argv )
 	int eosstage = 0;
 	gboolean vdispEos = false ;
 	gboolean intel_platform= false;
+	char graphfile[1024] ; 
+	gboolean graphdump = false ;
 
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
@@ -149,6 +152,7 @@ int main( int argc, char** argv )
 		{ "localDisplay", required_argument, 0, 'l' },
 		{ "debug", required_argument, 0, 'd' },
 		{ "intel-edge", no_argument, 0, 'e' },
+		{ "graphdump", required_argument, 0, 'G' },
 		{ 0,0,0,0 }} ;
 	int longindex;
 	dcvFtcDebug=0 ;
@@ -172,6 +176,11 @@ int main( int argc, char** argv )
                 {
 			intel_platform=TRUE;
 		}
+		if (ch == 'G') {
+			graphdump = true ;
+			strncpy(graphfile,optarg,1023) ;
+		}
+
 	}
 	/* check if application is running on  intel edgenode*/
 	if(TRUE == intel_platform )
@@ -334,6 +343,7 @@ int main( int argc, char** argv )
 	else {
 		g_print ("mqsrc should have been linked!!!\n") ;
 	}
+
 	if (dcvFtConnStart(D.ftc) == FALSE) {
 		g_print("Something happened during connection start\n") ;
 		exit(3) ;
@@ -406,6 +416,12 @@ int main( int argc, char** argv )
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
 					if (localdisplay) dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,++Dv.num_frames) ;
+					else Dv.num_frames++ ;
+					if (Dv.num_frames == 1 && graphdump == true) {
+						g_print("Dumping bin to file %s\n",graphfile) ;
+						GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(D.pipeline), GST_DEBUG_GRAPH_SHOW_MEDIA_TYPE,graphfile) ;
+					}
+
 				}
 			}
 			if (++notprocessed == 5) {

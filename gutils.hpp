@@ -44,7 +44,6 @@ typedef struct {
 
 int dcvBufQInit(dcv_bufq_t *P) ;
 
-typedef unsigned int u32 ;
 
 typedef void (*src_dfw_fn_t)(GstAppSrc *, guint, gpointer) ;
 typedef void (*src_dfs_fn_t)(GstAppSrc *, gpointer) ;
@@ -61,7 +60,7 @@ void dcvAppSrcStatus(GstAppSrc *s, srcstate_t *st) ;
 void dcvTagBuffer(void *A, int isz, void *B, int osz) ;
 gboolean dcvMatchBuffer(void *A, int isz, void *B, int osz) ;
 gint dcvMatchContainer (gconstpointer A, gconstpointer B ) ;
-int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d) ;
+int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d, tag_t *T) ;
 void dcvBufContainerFree(dcv_BufContainer_t *) ;
 gint dcvLengthOfStay(dcv_BufContainer_t *k) ;
 gint dcvTimeDiff(struct timeval t1, struct timeval t2) ;

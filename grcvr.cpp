@@ -7,8 +7,8 @@
 #include <gst/app/app.h>
 #include <plugins/elements/gsttee.h>
 #include "gsftc.hpp"
-#include "gutils.hpp"
 #include "rseq.hpp"
+#include "gutils.hpp"
 #include "dsopencv.hpp"
 #include "opencv2/video/tracking.hpp"
 #include "opencv2/imgproc.hpp"
@@ -62,9 +62,10 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
 
 gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
+static dcvFrameData_t Dv ;
 static char termdesc[] = "\
 appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
-rpdmx.src_96 ! queue ! rtph264depay name=vsd !  avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
+rpdmx.src_96 ! queue ! rtph264depay name=vsd ! parsebin ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! appsink name=vsink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! appsink name=dsink \
 appsrc name=vdisp ! queue ! video/x-raw,format=BGR ! %s";
 
@@ -72,10 +73,10 @@ static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
 rpdmx.src_96 ! queue name=q1 ! rtph264depay name=vsd ! queue ! tee name=tpoint \
 rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! appsink name=dsink \
-tpoint.src_0 ! queue name=q3 ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
+tpoint.src_0 ! queue name=q3 ! parsebin ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 rtpmux name=mux !  queue ! appsink name=usink \
 appsrc name=vdisp ! queue name=q5 ! video/x-raw,format=BGR ! %s \
-tpoint.src_1 ! queue ! h264parse ! video/x-h264,stream-format=byte-stream ! rtph264pay ! mux.sink_0 \
+tpoint.src_1 ! queue ! parsebin ! rtph264pay ! mux.sink_0 \
 appsrc name=dsrc ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
 
 typedef enum {
@@ -85,7 +86,7 @@ typedef enum {
 } grcvr_mode_e ;
 
 gboolean dcvQueuesLoaded(dpipe_t *pD, grcvr_mode_e grcvrMode) ;
-int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean localdisplay) ;
+int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean localdisplay, dcvFrameData_t *Dv) ;
 int dcvPushToSink(dpipe_t *pD) ;
 extern bufferCounter_t inbc,outbc;
 extern int dcvFtcDebug;
@@ -125,6 +126,9 @@ int main( int argc, char** argv )
 	int longindex;
 
 	dcvFtcDebug = dcvGstDebug = 0 ;
+	Dv.num_frames = 0;
+	Dv.avgProcessTime = 0;
+
 	while ((ch = getopt_long(argc, argv, "r:hp:i:l",longOpts,&longindex)) != -1) {
 		if (ch == 'r')
 		{
@@ -346,7 +350,7 @@ int main( int argc, char** argv )
 			while (dcvQueuesLoaded(&D, grcvrMode))
 			{
 				int vfp = 0 ;
-				vfp = dcvProcessQueues(&D,grcvrMode,vbufsnt,localdisplay) ;
+				vfp = dcvProcessQueues(&D,grcvrMode,vbufsnt,localdisplay,&Dv) ;
 				if (vfp) g_print("Bytes received:%d\n", D.ftc->recvbytes) ;
 				else 
 					break ;
@@ -473,7 +477,7 @@ gboolean dcvQueuesLoaded(dpipe_t *pD, grcvr_mode_e grcvrMode)
 	return (!g_queue_is_empty(pD->videoframequeue.bufq) && (grcvrMode == GRCVR_FIRST || !g_queue_is_empty(pD->olddataqueue.bufq)))  ;
 }
 
-int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean localdisplay)
+int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean localdisplay, dcvFrameData_t *Dv)
 {
 	int stay=0;
 	dcv_BufContainer_t *dataFrameContainer;
@@ -484,7 +488,7 @@ int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean 
 	static gint vfmatch=0;
 	gpointer videoFrameWaiting = NULL ;
 	gpointer dataFrameWaiting = NULL ;
-	static dcvFrameData_t Dv ;
+	tag_t T ;
 
 	if (vfmatch == -1) {
 		/** We failed last time, see if something has changed **/
@@ -503,7 +507,7 @@ int dcvProcessQueues(dpipe_t *pd, grcvr_mode_e grcvrMode, int vbufsnt, gboolean 
 		       return -1 ;
 	}
 
-	else if ( ((vfmatch = dcvFindMatchingContainer(pd->videoframequeue.bufq,dataFrameContainer)) == -1) ) {
+	else if ( ((vfmatch = dcvFindMatchingContainer(pd->videoframequeue.bufq,dataFrameContainer,&T)) == -1) ) {
 		g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",vfmatch, g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
 #if 1
 		if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
@@ -528,13 +532,17 @@ GRCVR_PROCESS:
 			dataFrameWaiting = dataFrameContainer->nb;
 			videoFrameWaiting = qe->nb ;
 			GstCaps *vcaps = qe->caps ;
-			newDataFrame = dcvProcessStage( videoFrameWaiting, vcaps,dataFrameWaiting, &Dv, stagef, &newVideoFrame ) ;
+			newDataFrame = dcvProcessStage( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, stagef, &newVideoFrame ) ;
 			if (localdisplay == TRUE) 
-				if (dcvLocalDisplay(newVideoFrame,vcaps,pd->vdisp,Dv.num_frames) != -1) Dv.num_frames++ ;
-				g_print("State of queues:vq=%d dq=%d\n",
-							g_queue_get_length(pd->videoframequeue.bufq),
-							g_queue_get_length(pd->olddataqueue.bufq)) ;
+			{
+				if (dcvLocalDisplay(newVideoFrame,vcaps,pd->vdisp,Dv->num_frames) != -1) Dv->num_frames++ ;
+			}
+			else
+				Dv->num_frames++ ;
+			g_print("State of queues:vq=%d dq=%d\n", g_queue_get_length(pd->videoframequeue.bufq), 
+					g_queue_get_length(pd->olddataqueue.bufq)) ;
 					
+				
 
 			if (grcvrMode == GRCVR_INTERMEDIATE) 
 			{
@@ -543,6 +551,31 @@ GRCVR_PROCESS:
 				g_print("Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
 						ret,++vbufsnt, g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
 			}
+			/** Record the time **/
+			{
+				struct timeval prcTime ;
+				struct timezone ntz;
+				unsigned long tx_sec, tx_usec ;
+				double tg_usec ;
+				gettimeofday(&prcTime,&ntz) ;
+				tx_usec = T.tstmp & 0xfffff ;
+				tx_sec = (T.tstmp >> 20) & 0xfff ;
+				prcTime.tv_sec &= 0xfff ;
+				prcTime.tv_usec &= 0xfffff ;
+				tg_usec = (double)((prcTime.tv_sec - tx_sec)%4096)*1000.0 + (double)(prcTime.tv_usec - tx_usec)/1000.0 ;
+				if (tg_usec < 0) {
+					g_print("Something wrong in time processing (%ld %ld proc) (%ld %ld current)\n",
+							tx_sec, tx_usec, prcTime.tv_sec,prcTime.tv_usec) ;
+				}
+				else 
+				{
+					Dv->avgProcessTime += tg_usec ;
+					g_print("Time processing (%ld %ld orig) (%ld %ld current)\n", tx_sec, tx_usec, prcTime.tv_sec,prcTime.tv_usec) ;
+					g_print("Processing time for frame %d: %.4g msec: avg=%.4g\n",
+							Dv->num_frames,tg_usec,Dv->avgProcessTime/Dv->num_frames) ;
+				}
+			}
+
 			gst_buffer_unref(GST_BUFFER_CAST(videoFrameWaiting));
 			gst_caps_unref(vcaps);
 			gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
