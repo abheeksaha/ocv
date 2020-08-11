@@ -298,6 +298,26 @@ using namespace std;
 void putFrameNum(Mat img, int fno) ;
 #include <vector>
 	/** Write a vector of points to an output array and vice versa **/
+int writeToArray(vector<Point> vlist, char *op, int opsize)
+{
+	char *pop = op ;
+	int step, tstep=0;
+	extern int foeDebug ;
+	step = sprintf(pop,"Size:%d\n",vlist.size()) ;
+	if (vlist.size() == 0) {
+		return step ;
+	}
+	pop += step ; tstep  += step;
+	if (foeDebug) { printf("Writing vector of points:%d\n",vlist.size()) ; }
+	for (vector<Point>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
+	{
+		step = sprintf(pop,"%.4g,%.4g\n",(float)it->x, (float)it->y);
+		if (foeDebug) printf("[%.4g %.4g] ",(float)it->x,(float)it->y) ;
+		pop += step ; tstep  += step;
+	}
+	if (foeDebug) printf("\n") ;
+	return tstep ;
+}
 int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 {
 	char *pop = op ;
@@ -314,8 +334,44 @@ int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 	}
 	return tstep ;
 }
+
+#ifdef FOESTAGE
+int writeToArray2vec(vector<Point2f> vlist, vector<Point2f> vlist2, char *op, int opsize)
+{
+	char *pop = op ;
+	int step, tstep=0;
+	extern int foeDebug ;
+	if (foeDebug && vlist.size() > 10) {
+		vlist.resize(10) ;
+		vlist2.resize(10) ;
+	}
+	step = sprintf(pop,"Size:%d\n",vlist.size()) ;
+	if (vlist.size() == 0) {
+		return step ;
+	}
+	pop += step ; tstep  += step;
+	if (foeDebug) printf("Vlist1:") ;
+	for (vector<Point2f>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
+	{
+		if (foeDebug) printf("[%.4g %.4g] ",it->x,it->y) ;
+		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
+		pop += step ; tstep  += step;
+	}
+	if (foeDebug) printf("\nVlist2:") ;
+	step = sprintf(pop,"NEXT VECTOR Size:%d\n",vlist2.size());
+	pop += step; tstep += step;
+	for (vector<Point2f>::iterator it = vlist2.begin() ; it != vlist2.end(); ++it)
+	{
+		if (foeDebug) printf("[%.4g %.4g] ",it->x,it->y) ;
+		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
+		pop += step ; tstep  += step;
+	}
+	if (foeDebug) printf("\n") ;
+	return tstep ;
+}
+#endif
 	
-int readFromBuffer(char *op,int sz, vector<Point2f> * pvlist)
+int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
 {
 	char *pop = op ;
 	char *tok ;
@@ -327,20 +383,70 @@ int readFromBuffer(char *op,int sz, vector<Point2f> * pvlist)
 	tok += strlen("Size:") ; nitems = atoi(tok) ;
 
 	if (nitems == 0) return 0 ; /** Don't mess with pvlist **/
-	if (pvlist->size() != nitems)
-		pvlist->resize(nitems) ; 
+	if (pvlist.size() != nitems)
+		pvlist.resize(nitems) ; 
 	
 	for (it=0; it<nitems; it++ )
 	{
 		float xv,yv ;
-		pop = strtok(NULL,",\n") ; tok = pop ; xv = atof(tok) ;
-		pop = strtok(NULL,",\n") ; tok = pop ; yv = atof(tok) ;
-		Point2f pv(xv,yv) ;
-		pvlist->push_back(pv) ;
+		pop = strtok(NULL,",\n") ; tok = pop ; if (!tok) break ;xv = atof(tok) ;
+		pop = strtok(NULL,",\n") ; tok = pop ; if (!tok) break ;yv = atof(tok) ;
+		pvlist[it].x = xv;
+	       	pvlist[it].y = yv;
 	}
-	if (it == nitems) return it ;
-	else return -1 ;
+	return it ;
 }
+#ifdef FOESTAGE
+int readFromBuffer2vec(char *op, int sz, vector<Point2f> & pvlist, vector<Point2f> &pvlist2)
+{
+	char *pop = op ;
+	char *tok ;
+	int nitems;
+	int it;
+	extern int foeDebug;
+	
+	pop = strtok(op,"\n") ;
+	tok = pop ; if (strncmp(tok,"Size:",5) != 0) {return -1 ;}
+	tok += strlen("Size:") ; nitems = atoi(tok) ;
+	printf("Items in first list:%d\n",nitems) ;
+
+	if (nitems == 0) return 0 ; /** Don't mess with pvlist **/
+	if (pvlist.size() != nitems)
+		pvlist.resize(nitems) ; 
+	
+	if (foeDebug) printf("pvlist:") ;
+	for (it=0; it<nitems; it++ )
+	{
+		float xv,yv ;
+		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ;xv = atof(tok) ;
+		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ;yv = atof(tok) ;
+		Point2f pv(xv,yv) ;
+		if (foeDebug) printf("[%.4g %.4g] ",xv,yv) ;
+		pvlist[it] = pv ;
+	}
+	nitems = it ;
+	pop = strtok(NULL,"\n") ;
+	tok = pop ; if (strncmp(tok,"NEXT VECTOR Size:",17) != 0) {return -1 ;}
+	tok += strlen("NEXT VECTOR Size:") ; nitems = atoi(tok) ;
+	printf("Items in second list:%d\n",nitems) ;
+	if (nitems == 0) return 0 ;
+	if (pvlist2.size() != nitems)
+		pvlist2.resize(nitems) ; 
+	if (foeDebug) printf("\npvlist2:") ;
+	for (it=0; it<nitems; it++ )
+	{
+		float xv,yv ;
+		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ; xv = atof(tok) ;
+		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ; yv = atof(tok) ;
+		if (foeDebug) printf("[%.4g %.4g] ",xv,yv) ;
+		Point2f pv(xv,yv) ;
+		pvlist2[it] = pv ;
+	}
+	if (foeDebug) printf("\n") ;
+	if (it != nitems) return -1 ;
+	else return it;
+}
+#endif
 	
 gboolean frameToImg(GstBuffer *buf, GstCaps *caps, Mat *img, dcvFrameData_t *df)
 {
@@ -378,6 +484,7 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 	static int count = 1 ;
 	{
         	cvtColor(img, gray, COLOR_BGR2GRAY);
+		Mat edges(img.size(), CV_8U) ;
 		goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
 		cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
 
@@ -437,9 +544,10 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 	static Mat prevGray ;
 	int nitems;
 	static int fno = 0 ;
+	int osize=0;
 	
         cvtColor(img, gray, COLOR_BGR2GRAY);
-	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, &points1)) == -1)) {
+	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points1)) == -1)) {
 	       g_print("Read from buffer failed\n")	;
 	       return -1 ;
 	}
@@ -490,19 +598,24 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 		}
             }
             points1.resize(k);
+            points0.resize(k);
 	}
 	putFrameNum(img,++fno) ;
+	if (dataout != NULL) {
+		osize = writeToArray2vec(points0,points1,dataout,outdatasize) ;
+		g_print("Stage 2 returns %d bytes\n",osize) ;
+	}
 //imshow...	
 	swap(points1, points0);
 	swap(prevGray, gray);
-	return 0;
+	return osize;
 }
 
 void putFrameNum(Mat img, int fno)
 {
 	char text[24] ;
 	int fontFace = FONT_HERSHEY_SCRIPT_SIMPLEX;
-	double fontScale = 2;
+	double fontScale = 1.5;
 	int thickness = 3;
 	int baseline=0;
 	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
