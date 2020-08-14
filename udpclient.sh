@@ -1,7 +1,7 @@
 #!/bin/sh
-file="video_test1.mkv"
+file="cardrivingIndia.mkv"
 destination="192.168.1.71"
-port="50018"
+port="50017"
 
 if [ $# -gt 0 ]; then
 	if [ $1 = "-h" ]; then

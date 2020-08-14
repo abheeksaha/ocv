@@ -85,6 +85,11 @@
 
 
 int dcvOptDebug = 0;
+#ifdef FOE
+#include "foe.hpp"
+#else
+int foeDebug() { return 0 ; }
+#endif
 
 namespace cv {
 
@@ -302,20 +307,19 @@ int writeToArray(vector<Point> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
-	extern int foeDebug ;
 	step = sprintf(pop,"Size:%d\n",vlist.size()) ;
 	if (vlist.size() == 0) {
 		return step ;
 	}
 	pop += step ; tstep  += step;
-	if (foeDebug) { printf("Writing vector of points:%d\n",vlist.size()) ; }
+	if (foeDebug()) { printf("Writing vector of points:%d\n",vlist.size()) ; }
 	for (vector<Point>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
 	{
 		step = sprintf(pop,"%.4g,%.4g\n",(float)it->x, (float)it->y);
-		if (foeDebug) printf("[%.4g %.4g] ",(float)it->x,(float)it->y) ;
+		if (foeDebug()) printf("[%.4g %.4g] ",(float)it->x,(float)it->y) ;
 		pop += step ; tstep  += step;
 	}
-	if (foeDebug) printf("\n") ;
+	if (foeDebug()) printf("\n") ;
 	return tstep ;
 }
 int writeToArray(vector<Point2f> vlist, char *op, int opsize)
@@ -340,8 +344,7 @@ int writeToArray2vec(vector<Point2f> vlist, vector<Point2f> vlist2, char *op, in
 {
 	char *pop = op ;
 	int step, tstep=0;
-	extern int foeDebug ;
-	if (foeDebug && vlist.size() > 10) {
+	if (foeDebug() && vlist.size() > 10) {
 		vlist.resize(10) ;
 		vlist2.resize(10) ;
 	}
@@ -350,23 +353,23 @@ int writeToArray2vec(vector<Point2f> vlist, vector<Point2f> vlist2, char *op, in
 		return step ;
 	}
 	pop += step ; tstep  += step;
-	if (foeDebug) printf("Vlist1:") ;
+	if (foeDebug()) printf("Vlist1:") ;
 	for (vector<Point2f>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
 	{
-		if (foeDebug) printf("[%.4g %.4g] ",it->x,it->y) ;
+		if (foeDebug()) printf("[%.4g %.4g] ",it->x,it->y) ;
 		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
 		pop += step ; tstep  += step;
 	}
-	if (foeDebug) printf("\nVlist2:") ;
+	if (foeDebug()) printf("\nVlist2:") ;
 	step = sprintf(pop,"NEXT VECTOR Size:%d\n",vlist2.size());
 	pop += step; tstep += step;
 	for (vector<Point2f>::iterator it = vlist2.begin() ; it != vlist2.end(); ++it)
 	{
-		if (foeDebug) printf("[%.4g %.4g] ",it->x,it->y) ;
+		if (foeDebug()) printf("[%.4g %.4g] ",it->x,it->y) ;
 		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
 		pop += step ; tstep  += step;
 	}
-	if (foeDebug) printf("\n") ;
+	if (foeDebug()) printf("\n") ;
 	return tstep ;
 }
 #endif
@@ -403,7 +406,6 @@ int readFromBuffer2vec(char *op, int sz, vector<Point2f> & pvlist, vector<Point2
 	char *tok ;
 	int nitems;
 	int it;
-	extern int foeDebug;
 	
 	pop = strtok(op,"\n") ;
 	tok = pop ; if (strncmp(tok,"Size:",5) != 0) {return -1 ;}
@@ -414,14 +416,14 @@ int readFromBuffer2vec(char *op, int sz, vector<Point2f> & pvlist, vector<Point2
 	if (pvlist.size() != nitems)
 		pvlist.resize(nitems) ; 
 	
-	if (foeDebug) printf("pvlist:") ;
+	if (foeDebug()) printf("pvlist:") ;
 	for (it=0; it<nitems; it++ )
 	{
 		float xv,yv ;
 		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ;xv = atof(tok) ;
 		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ;yv = atof(tok) ;
 		Point2f pv(xv,yv) ;
-		if (foeDebug) printf("[%.4g %.4g] ",xv,yv) ;
+		if (foeDebug()) printf("[%.4g %.4g] ",xv,yv) ;
 		pvlist[it] = pv ;
 	}
 	nitems = it ;
@@ -432,17 +434,17 @@ int readFromBuffer2vec(char *op, int sz, vector<Point2f> & pvlist, vector<Point2
 	if (nitems == 0) return 0 ;
 	if (pvlist2.size() != nitems)
 		pvlist2.resize(nitems) ; 
-	if (foeDebug) printf("\npvlist2:") ;
+	if (foeDebug()) printf("\npvlist2:") ;
 	for (it=0; it<nitems; it++ )
 	{
 		float xv,yv ;
 		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ; xv = atof(tok) ;
 		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ; yv = atof(tok) ;
-		if (foeDebug) printf("[%.4g %.4g] ",xv,yv) ;
+		if (foeDebug()) printf("[%.4g %.4g] ",xv,yv) ;
 		Point2f pv(xv,yv) ;
 		pvlist2[it] = pv ;
 	}
-	if (foeDebug) printf("\n") ;
+	if (foeDebug()) printf("\n") ;
 	if (it != nitems) return -1 ;
 	else return it;
 }
@@ -486,7 +488,11 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
         	cvtColor(img, gray, COLOR_BGR2GRAY);
 		Mat edges(img.size(), CV_8U) ;
 		goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
-		cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
+		if (pointsg.empty()) printf("No features to track\n") ;
+		else {
+			printf ("%d points to track\n",pointsg.size()) ;
+			cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
+		}
 
 		--count ;
 		if (count == 0) {
