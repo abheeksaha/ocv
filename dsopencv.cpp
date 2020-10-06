@@ -340,50 +340,46 @@ int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 }
 
 #ifdef FOESTAGE
-int writeToArray2vec(vector<Point2f> vlist, vector<Point2f> vlist2, char *op, int opsize)
+int writeToArrayContours(vector<vector<Point2f>> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
-	if (foeDebug() && vlist.size() > 10) {
-		vlist.resize(10) ;
-		vlist2.resize(10) ;
-	}
-	step = sprintf(pop,"Size:%d\n",vlist.size()) ;
+	int it;
+
+	step = sprintf(pop,"List:%d\n",vlist.size()) ;
 	if (vlist.size() == 0) {
 		return step ;
 	}
 	pop += step ; tstep  += step;
-	if (foeDebug()) printf("Vlist1:") ;
-	for (vector<Point2f>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
+	for (it = 0 ; it < vlist.size(); ++it)
 	{
-		if (foeDebug()) printf("[%.4g %.4g] ",it->x,it->y) ;
-		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
-		pop += step ; tstep  += step;
+		if (opsize < tstep) break ;
+		step = writeToArray(vlist[it],pop,opsize - tstep) ;
+		tstep += step ;
+		pop += step ;
 	}
-	if (foeDebug()) printf("\nVlist2:") ;
-	step = sprintf(pop,"NEXT VECTOR Size:%d\n",vlist2.size());
-	pop += step; tstep += step;
-	for (vector<Point2f>::iterator it = vlist2.begin() ; it != vlist2.end(); ++it)
-	{
-		if (foeDebug()) printf("[%.4g %.4g] ",it->x,it->y) ;
-		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
-		pop += step ; tstep  += step;
-	}
-	if (foeDebug()) printf("\n") ;
-	return tstep ;
+	return it ;
 }
 #endif
 	
+//
+// Buffer format
+// Size:<number of entries>
+// Entry can be a point or a list of points.
+// List of points are given with a starting [Size:]
+//
 int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
 {
 	char *pop = op ;
 	char *tok ;
 	int nitems;
 	int it;
+	bool contour=false ;
 	
 	pop = strtok(op,"\n") ;
 	tok = pop ; if (strncmp(tok,"Size:",5) != 0) {return false ;}
-	tok += strlen("Size:") ; nitems = atoi(tok) ;
+	tok += strlen("Size:") ; 
+	nitems = atoi(tok) ;
 
 	if (nitems == 0) return 0 ; /** Don't mess with pvlist **/
 	if (pvlist.size() != nitems)
@@ -400,53 +396,33 @@ int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
 	return it ;
 }
 #ifdef FOESTAGE
-int readFromBuffer2vec(char *op, int sz, vector<Point2f> & pvlist, vector<Point2f> &pvlist2)
+int readFromBufferContours(char *op, int sz, vector <vector<Point2f>> &pvlist)
 {
 	char *pop = op ;
 	char *tok ;
-	int nitems;
-	int it;
+	int ncontours;
+	int it,tstep=0,lsz;
 	
-	pop = strtok(op,"\n") ;
-	tok = pop ; if (strncmp(tok,"Size:",5) != 0) {return -1 ;}
-	tok += strlen("Size:") ; nitems = atoi(tok) ;
-	printf("Items in first list:%d\n",nitems) ;
+	tok = strtok(op,"\n") ;
+	pop = &op[strlen(tok)] ;
+	lsz = sz - strlen(tok) ;
+	if (strncmp(tok,"List:",5) != 0) {return -1 ;}
+	tok += strlen("Size:") ; ncontours = atoi(tok) ;
+	printf("Number of lists:%d\n",ncontours) ;
 
-	if (nitems == 0) return 0 ; /** Don't mess with pvlist **/
-	if (pvlist.size() != nitems)
-		pvlist.resize(nitems) ; 
+
+	if (ncontours == 0) return 0 ; /** Don't mess with pvlist **/
+	if (pvlist.size() != ncontours)
+		pvlist.resize(ncontours) ; 
 	
-	if (foeDebug()) printf("pvlist:") ;
-	for (it=0; it<nitems; it++ )
+	for (it=tstep=0; it<ncontours; it++ )
 	{
-		float xv,yv ;
-		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ;xv = atof(tok) ;
-		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ;yv = atof(tok) ;
-		Point2f pv(xv,yv) ;
-		if (foeDebug()) printf("[%.4g %.4g] ",xv,yv) ;
-		pvlist[it] = pv ;
+		pop += tstep;
+		lsz -= tstep;
+		if (lsz <= 0) break ;
+		tstep += readFromBuffer(pop,lsz,pvlist[it]) ;
 	}
-	nitems = it ;
-	pop = strtok(NULL,"\n") ;
-	tok = pop ; if (strncmp(tok,"NEXT VECTOR Size:",17) != 0) {return -1 ;}
-	tok += strlen("NEXT VECTOR Size:") ; nitems = atoi(tok) ;
-	printf("Items in second list:%d\n",nitems) ;
-	if (nitems == 0) return 0 ;
-	if (pvlist2.size() != nitems)
-		pvlist2.resize(nitems) ; 
-	if (foeDebug()) printf("\npvlist2:") ;
-	for (it=0; it<nitems; it++ )
-	{
-		float xv,yv ;
-		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ; xv = atof(tok) ;
-		pop = strtok(NULL,",\n") ; tok = pop ; if (tok == NULL) break ; yv = atof(tok) ;
-		if (foeDebug()) printf("[%.4g %.4g] ",xv,yv) ;
-		Point2f pv(xv,yv) ;
-		pvlist2[it] = pv ;
-	}
-	if (foeDebug()) printf("\n") ;
-	if (it != nitems) return -1 ;
-	else return it;
+	return it;
 }
 #endif
 	
@@ -543,8 +519,7 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 {
 	vector<uchar> status;
 	vector<float> err;
-    	static vector<Point2f> points0;
-    	static vector<Point2f> points1(500);
+    	static vector<vector<Point2f>> points(2);
 	Size winSize(31,31)  ;
 	static Mat gray;
 	static Mat prevGray ;
@@ -552,26 +527,29 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 	static int fno = 0 ;
 	int osize=0;
 	
+	if (points[1].size() == 0) 
+		points[1].resize(500) ;
         cvtColor(img, gray, COLOR_BGR2GRAY);
-	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points1)) == -1)) {
+	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
+//	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
 	       g_print("Read from buffer failed\n")	;
 	       return -1 ;
 	}
 	else if (nitems == 0) if (dcvOptDebug) g_print("No new points, please carry on using old points\n") ;
-	if (!points0.empty())
+	if (!points[0].empty())
         {
 		if(prevGray.empty())
 			img.copyTo(prevGray);
-            calcOpticalFlowPyrLK(prevGray, gray, points0, points1, status, err, winSize,
+            calcOpticalFlowPyrLK(prevGray, gray, points[0], points[1], status, err, winSize,
                                  3, termcrit, 0, 0.001);
 	    if (dcvOptDebug) g_print("Optical flow computed\n") ;
             size_t i, k;
-            for( i = k = 0; i < points1.size(); i++ )
+            for( i = k = 0; i < points[1].size(); i++ )
             {
                 if( !status[i] )
                     continue;
 	
-                points1[k++] = points1[i];
+                points[1][k++] = points[1][i];
                 {
             		int line_thickness = 4;
 			/* CV_RGB(red, green, blue) is the red, green, and blue components
@@ -579,10 +557,10 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 
 			cv::Scalar line_color = CV_RGB(0,0,255);
 			CvPoint p,q;
-			p.x = (int) points0[i].x;
-			p.y = (int) points0[i].y;
-			q.x = (int) points1[i].x;
-			q.y = (int) points1[i].y;
+			p.x = (int) points[0][i].x;
+			p.y = (int) points[0][i].y;
+			q.x = (int) points[1][i].x;
+			q.y = (int) points[1][i].y;
 			double angle;		angle = atan2( (double) p.y - q.y, (double) p.x - q.x );
 			double hypotenuse;	hypotenuse = sqrt( pow(p.y - q.y,2.0) + pow(p.x - q.x,2.0) );
 			/* Here we lengthen the arrow by a factor of three. */
@@ -603,16 +581,16 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 			line( img, p, q, line_color, line_thickness, 16, 0 );
 		}
             }
-            points1.resize(k);
-            points0.resize(k);
+            points[1].resize(k);
+            points[0].resize(k);
 	}
 	putFrameNum(img,++fno) ;
 	if (dataout != NULL) {
-		osize = writeToArray2vec(points0,points1,dataout,outdatasize) ;
+		osize = writeToArrayContours(points,dataout,outdatasize) ;
 		g_print("Stage 2 returns %d bytes\n",osize) ;
 	}
 //imshow...	
-	swap(points1, points0);
+	swap(points[1], points[0]);
 	swap(prevGray, gray);
 	return osize;
 }

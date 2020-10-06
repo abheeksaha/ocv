@@ -31,7 +31,7 @@ int stagen(cv::Mat img, void *pointlist, int size, void *dataout, int outdatasiz
 
 int writeToArray(std::vector<cv::Point2f> vlist, char *op, int opsize) ;
 int writeToArray(std::vector<cv::Point> vlist, char *op, int opsize) ;
-int writeToArray2vec(std::vector<cv::Point2f> vlist, std::vector<cv::Point2f> vlist2, char *op, int opsize) ;
+int writeToArrayContours(std::vector <std::vector<cv::Point2f>> vlist, char *op, int opsize) ;
 int readFromBuffer(char *op,int sz, std::vector<cv::Point2f> & pvlist) ;
-int readFromBuffer2vec(char *op, int sz, std::vector<cv::Point2f> & pvlist, std::vector<cv::Point2f> &pvlist2) ;
+int readFromBufferContours(char *op, int sz, std::vector <std::vector<cv::Point2f>> &pvlist) ;
 #endif

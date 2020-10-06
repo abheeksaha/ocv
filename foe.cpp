@@ -246,35 +246,71 @@ Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> p
 int foeDetectEdges(Mat image, char *op, int maxdata)
 {
 }
-int foeDetectContours(Mat image, char *op, int maxdata)
+int foeDetectContours(Mat & gray, char *op, int maxdata)
 {
-	Mat gray;
-	int i, tsize=0;
+	Mat gray2,cannyOp;
+	int i,j, tsize=0;
 	char *pop;
-	vector < vector<Point>> cntrs ;
+	static vector < vector<Point>> refcntrs ;
+	vector < vector<Point>> cntrs, cntrs_s ;
 	int np,tpoints = 0;
+	int cthresh=100 ;
 
-	image.convertTo(gray,CV_8UC1);
+	gray.convertTo(gray,CV_8UC1);
 	cvtColor(gray,gray,COLOR_BGR2GRAY) ;
 //    threshold(gray, gray, 128, 255, THRESH_BINARY);
-    findContours( gray, cntrs, RETR_LIST, CHAIN_APPROX_NONE );
+	Canny(gray, cannyOp,cthresh, cthresh*2) ;
+    findContours( cannyOp, cntrs, RETR_LIST, CHAIN_APPROX_SIMPLE );
     if (cntrs.empty()) cout << "No contours found\n" ;
     else cout << cntrs.size() << " contours found\n" ;
+    if (refcntrs.size() == 0) {
+	    refcntrs.resize(cntrs.size()) ;
+	    for (i=0; i<cntrs.size(); i++) {
+		refcntrs[i] = cntrs[i] ;
+	    }
+	    printf("Stored %d reference counters\n",refcntrs.size()) ;
+    }
+    else {
+	    int elim=0;
+	    for (i=0; i<cntrs.size(); i++) {
+		    double mingap=10;
+		    int minpos = -1 ;
+		    for (j=0; j<refcntrs.size(); j++) {
+			    double gap=matchShapes(refcntrs[j],cntrs[i],CONTOURS_MATCH_I1,0) ;
+			    if (fabs(gap) < fabs(mingap)) { mingap = gap ; minpos = j ; }
+		    }
+		    if (minpos != -1 && fabs(mingap) < 1) {
+			    cntrs[i].resize(0) ;
+			    elim++ ;
+		    }
+	    }
+	    printf("Eliminated %d counters\n", elim) ;
+    }
+
 
     pop = op ;
-    for (i=0; i<cntrs.size(); i++)
+    cntrs_s.resize(cntrs.size()) ;
+    for (i=j=0; i<cntrs.size(); i++)
     {
-	    tpoints += cntrs[i].size() ;
+	    if (cntrs[i].size() == 0) continue ;
+	    double eps = 0.005*arcLength(cntrs[i],true) ;
+	    approxPolyDP(cntrs[i],cntrs_s[j],eps,true) ;
+	    tpoints += cntrs_s[j].size() ;
+	    j++ ;
     }
-    cout << "Total contour points " << tpoints << " " ;
+    cntrs_s.resize(j) ;
+    cout << "Total contours " << j << " contour points " << tpoints << " " ;
     vector <Point2f> cntrpoints(tpoints) ;
-    for (i=0,np=0; i<cntrs.size(); i++) {
-	for (vector<Point>::iterator it = cntrs[i].begin() ; it != cntrs[i].end(); ++it)
+    for (i=0,np=0; i<cntrs_s.size(); i++) {
+	for (vector<Point>::iterator it = cntrs_s[i].begin() ; it != cntrs_s[i].end(); ++it)
 		cntrpoints[np++] = Point2f((float)it->x, (float)it->y) ;
     }
     cout << np << " points written\n" ;
 
+    Scalar fgcolor(240,113,113) ;
     tsize = writeToArray(cntrpoints,pop,maxdata) ;
+	cvtColor(gray,gray,COLOR_GRAY2BGR) ;
+	drawContours(gray,cntrs_s,-1,fgcolor,2) ;
     return tsize ;
 }
 } // Namespace foe

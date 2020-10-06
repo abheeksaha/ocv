@@ -19,6 +19,6 @@ typedef struct {
 
 
 Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> pred, int width, int height)  ;
-int foeStage1(Mat image, char *op, int maxdata) ;
+int foeDetectContours(Mat & image, char *op, int maxdata) ;
 }
 #endif
