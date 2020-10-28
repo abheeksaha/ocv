@@ -47,6 +47,7 @@
 #ifndef __GST_DCV_H__
 #define __GST_DCV_H__
 
+#include <sys/time.h>
 #include <gst/gst.h>
 
 G_BEGIN_DECLS
@@ -87,6 +88,16 @@ typedef struct {
 	dcv_bufq_t videoframequeue;
 } dcv_data_struct_t ;
 
+typedef struct {
+	int height;
+	int width;
+	gint channels;
+	gboolean isOutputByteBuffer ;
+	int framerate ;
+	int num_frames ;
+	double avgProcessTime ;
+}  dcvFrameData_t ;
+
 struct _Gstdcv
 {
   GstElement element;
@@ -105,6 +116,13 @@ struct _Gstdcv
   dcv_data_struct_t Q ;
 } ;
 
+
+typedef int (* dcvStageFn_t )(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
+typedef GstBuffer * (* dcvProcessFn_t)(GstBuffer *,GstCaps *,GstBuffer *,dcvFrameData_t *,dcvStageFn_t, GstBuffer **) ;
+typedef struct {
+	dcvProcessFn_t mf;
+	dcvStageFn_t sf;
+} gst_dcv_stage_t ;
 
 typedef int (* dcv_fn_t )(void * img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
 #define GST_DCV(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DCV,Gstdcv))

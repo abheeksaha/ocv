@@ -5,7 +5,7 @@
 #include <gst/gst.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
-#include "rseq.hpp"
+#include "rseq.h"
 #include "gutils.hpp"
 
 
@@ -313,10 +313,10 @@ GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 		return GST_FLOW_ERROR;
 }
 
-typedef struct {
-	dcv_bufq_t *pD ;
-	GstCaps * caps ;
-} dcv_bufq_loc_t  ;
+//typedef struct {
+//	dcv_bufq_t *pD ;
+//	GstCaps * caps ;
+//} dcv_bufq_loc_t  ;
 
 GstFlowReturn sink_trypullsample(GstAppSink *slf, dcv_bufq_t *d)
 {

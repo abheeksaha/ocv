@@ -63,11 +63,15 @@
 #include <sys/time.h>
 #include <gst/gst.h>
 #include <gst/app/app.h>
+#include "opencv2/video/tracking.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include "opencv2/highgui.hpp"
 
 #include "../rseq.h"
-#include "gutils.h"
-#include "dsopencv.hpp"
+#include "dcvutils.h"
 #include "gstdcv.h"
+#include "dsopencv.hpp"
 
 GST_DEBUG_CATEGORY_STATIC (gst_dcv_debug);
 #define GST_CAT_DEFAULT gst_dcv_debug
@@ -318,7 +322,7 @@ GRCVR_PROCESS:
 			GstCaps *vcaps = qe->caps ;
 #if 1
 			if (stagef != NULL)
-				newDataFrame = dcvProcessStage( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, stagef, &newVideoFrame ) ;
+				newDataFrame = dcvProcessFn( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, filter->execFn, &newVideoFrame ) ;
 			else 
 #endif
 			{

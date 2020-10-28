@@ -82,4 +82,5 @@ void bufferCounterInit(bufferCounter_t *i, bufferCounter_t *o) ;
 void bufferCounterDump(int signalnum) ;
 
 int dcvLocalDisplay(GstBuffer *gb, GstCaps *vcaps, GstAppSrc *vdisp, int num_frames) ;
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb) ;
 #endif

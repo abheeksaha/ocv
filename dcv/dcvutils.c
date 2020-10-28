@@ -5,8 +5,13 @@
 #include <gst/gst.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
+#include "opencv2/video/tracking.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include "opencv2/highgui.hpp"
 #include "rseq.h"
-#include "gutils.h"
+#include "dcvutils.h"
+#include "dsopencv.hpp"
 
 
 bufferCounter_t inbc,outbc;
@@ -185,3 +190,8 @@ int dcvBufQInit(dcv_bufq_t *P)
 	P->entries = 0;
 }
 
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb)
+{
+	gst_dcv_stage_t *F = (gst_dcv_stage_t *)execFn ;
+	return F->mf(vbuf,gcaps,dbuf,df,F->sf,newvb) ;
+}

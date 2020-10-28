@@ -4,7 +4,6 @@
 #include <sys/time.h>
 #define validstate(k) ((k>=0) && (k<=4))
 
-
 typedef enum {
 	EOS_VSINK,
 	EOS_DSINK,
@@ -17,19 +16,6 @@ typedef enum {
 GST_DEBUG_CATEGORY_STATIC (my_category);
 #define GST_CAT_DEFAULT my_category
 
-typedef struct {
-	GQueue *bufq;
-	struct timeval lastData;
-	struct timezone tz;
-	int entries ;
-} dcv_bufq_t ;
-
-typedef struct {
-	GstBuffer *nb;
-	GstCaps *caps;
-	struct timeval ctime;
-	struct timezone ctz;
-} dcv_BufContainer_t ;
 
 typedef enum {
 	G_WAITING,
@@ -41,6 +27,24 @@ typedef struct {
 	int length ;
 	gboolean finished ;
 }srcstate_t ;
+
+#if 0
+typedef struct {
+	GQueue *bufq;
+	struct timeval lastData;
+	struct timezone tz;
+	int entries ;
+} dcv_bufq_t ;
+
+
+typedef struct {
+	GstBuffer *nb;
+	GstCaps *caps;
+	struct timeval ctime;
+	struct timezone ctz;
+} dcv_BufContainer_t ;
+#endif
+
 
 int dcvBufQInit(dcv_bufq_t *P) ;
 

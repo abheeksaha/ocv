@@ -10,7 +10,7 @@
 #include <plugins/elements/gsttee.h>
 
 #include "gsftc.hpp"
-#include "rseq.hpp"
+#include "rseq.h"
 #include "gutils.hpp"
 #include "dsopencv.hpp"
 static void help(char *name)

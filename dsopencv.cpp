@@ -73,9 +73,10 @@
 #include <gst/pbutils/encoding-profile.h>
 //#include <gst/base/gsttypefindhelper.h>
 
-#include "dsopencv.hpp"
-#include "rseq.hpp"
+#include "rseq.h"
+#include "gstdcv.h"
 #include "gutils.hpp"
+#include "dsopencv.hpp"
 #define CV_WARN(...) CV_LOG_WARNING(NULL, "OpenCV | GStreamer warning: " << __VA_ARGS__)
 
 #define COLOR_ELEM "videoconvert"
@@ -94,7 +95,7 @@ int foeDebug() { return 0 ; }
 namespace cv {
 
 static void toFraction(double decimal, CV_OUT int& numerator, CV_OUT int& denominator);
-static gboolean determineFrameDims(Size *sz, gint* channels, bool* isOutputByteBuffer, GstCaps *frame_caps) ;
+static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutputByteBuffer, GstCaps *frame_caps) ;
 
 //==================================================================================================
 
@@ -110,7 +111,7 @@ gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, Mat * img,dcvFrameData_t
     Size sz;
     df->channels = 0;
     df->isOutputByteBuffer = false ;
-    if (!determineFrameDims(&sz, &df->channels, &df->isOutputByteBuffer, caps))
+    if (determineFrameDims(&sz, &df->channels, &df->isOutputByteBuffer, caps) != true)
         return false;
     df->height = sz.height ;
     df->width = sz.width ;
@@ -143,7 +144,7 @@ gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, Mat * img,dcvFrameData_t
     return true;
 }
 
-static gboolean determineFrameDims(Size *sz, gint* channels, bool* isOutputByteBuffer, GstCaps *frame_caps)
+static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutputByteBuffer, GstCaps *frame_caps)
 {
     guint32 width,height;
 
@@ -620,6 +621,7 @@ void putFrameNum(Mat img, int fno)
 	
 /** Main platform functions **/
 #define MAXSTAGEDATASIZE 16384
+extern "C" 
 GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb)
 {
 	Mat img;
@@ -648,7 +650,7 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 		}
 	}
 	else {
-		size = stage(img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
+		size = stage((cv::Mat)img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
 	}
 	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
 	
