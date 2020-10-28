@@ -55,15 +55,66 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (Gstdcv, gst_dcv,
     GST, PLUGIN_TEMPLATE, GstElement)
 
+typedef enum {
+	GRCVR_FIRST,
+	GRCVR_INTERMEDIATE,
+	GRCVR_LAST
+} grcvr_mode_e ;
+
+
+typedef struct {
+	GQueue *bufq;
+	struct timeval lastData;
+	struct timezone tz;
+	int entries ;
+} dcv_bufq_t ;
+
+typedef struct {
+	dcv_bufq_t *pD ;
+	GstCaps * caps ;
+} dcv_bufq_loc_t  ;
+
+typedef struct {
+	GstBuffer *nb;
+	GstCaps *caps;
+	struct timeval ctime;
+	struct timezone ctz;
+} dcv_BufContainer_t ;
+
+typedef struct {
+	dcv_bufq_t dataqueue;
+	dcv_bufq_t olddataqueue;
+	dcv_bufq_t videoframequeue;
+} dcv_data_struct_t ;
+
 struct _Gstdcv
 {
   GstElement element;
 
-  GstPad *sinkpad, *srcpad;
+  GstPad *video_in, *rtp_in;
+  GstPad *video_out, *rtp_out;
 
   gboolean silent;
-};
+  gpointer execFn;
+  gint     grcvrMode ;
+  gint     vfmatch ;
+  gint     vbufsnt;
+  GstCaps *vcaps ;
+  GstCaps *dcaps ;
+  dcvFrameData_t *Dv ;
+  dcv_data_struct_t Q ;
+} ;
 
+
+typedef int (* dcv_fn_t )(void * img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
+#define GST_DCV(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DCV,Gstdcv))
+#define GST_DCV_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_DCV,GstdcvClass))
+#define GST_IS_DCV(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_DCV))
+#define GST_IS_DCV_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_DCV))
+
+static int dcvProcessQueuesDcv(Gstdcv * filter) ;
+/* Standard function returning type information. */
+GType gst_my_filter_get_type (void);
 G_END_DECLS
 
 #endif /* __GST_DCV_H__ */
