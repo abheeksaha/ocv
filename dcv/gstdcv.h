@@ -112,12 +112,12 @@ struct _Gstdcv
   gint     vbufsnt;
   GstCaps *vcaps ;
   GstCaps *dcaps ;
-  dcvFrameData_t *Dv ;
+  dcvFrameData_t Dv ;
   dcv_data_struct_t Q ;
 } ;
 
 
-typedef int (* dcvStageFn_t )(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
+typedef int (* dcvStageFn_t )(cv::Mat , void *, int , void * , int ) ;
 typedef GstBuffer * (* dcvProcessFn_t)(GstBuffer *,GstCaps *,GstBuffer *,dcvFrameData_t *,dcvStageFn_t, GstBuffer **) ;
 typedef struct {
 	dcvProcessFn_t mf;

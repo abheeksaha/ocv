@@ -152,8 +152,8 @@ gst_dcv_class_init (GstdcvClass * klass)
           FALSE, G_PARAM_READWRITE));
 
   g_object_class_install_property (gobject_class, PROP_DCV_EXEC_FN,
-      g_param_spec_boolean ("stage-function", "Processing Function", "How to process the function",
-          NULL, G_PARAM_READWRITE));
+      g_param_spec_pointer ("stage-function", "stagef", "How to process the function",
+          G_PARAM_READWRITE));
 
   g_object_class_install_property (gobject_class, PROP_DCV_MODE,
       g_param_spec_boolean ("grcvrMode", "grcvrMode", "Intermediate/Terminal",
@@ -273,7 +273,7 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 	static struct timezone tz;
 	grcvr_mode_e grcvrMode = (grcvr_mode_e)filter->grcvrMode ;
 	dcv_data_struct_t *pd = &(filter->Q);
-	dcvFrameData_t *Dv = filter->Dv ;
+	dcvFrameData_t *Dv = &(filter->Dv) ;
 	gpointer videoFrameWaiting = NULL ;
 	gpointer dataFrameWaiting = NULL ;
 	tag_t T ;
@@ -389,6 +389,7 @@ gst_dcv_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   Gstdcv *filter = GST_DCV (object);
+  g_print("%s: Setting property %u\n",gst_element_get_name(GST_ELEMENT(object)), prop_id) ;
 
   switch (prop_id) {
     case PROP_SILENT:

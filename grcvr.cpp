@@ -8,13 +8,13 @@
 #include <plugins/elements/gsttee.h>
 #include "gsftc.hpp"
 #include "rseq.h"
-#include "gstdcv.h"
-#include "gutils.hpp"
-#include "dsopencv.hpp"
 #include "opencv2/video/tracking.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
+#include "gstdcv.h"
+#include "gutils.hpp"
+#include "dsopencv.hpp"
 
 
 static void help(char *name)
@@ -62,7 +62,7 @@ appsrc name=usrc ! application/x-rtp ! rtpptdemux name=rpdmx \
 dcv name=dcvTerminal \
 rpdmx.src_96 ! queue ! rtph264depay name=vsd ! parsebin ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! dcvTerminal.video_sink \
 rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! application/x-rtp ! dcvTerminal.rtp_sink \
-dcvTerminal.video_src ! video/x-raw,format=BGR ! %s";
+dcvTerminal.video_src ! video/x-raw,format=BGR ! queue ! %s";
 
 static char relaydesc[] = "\
 appsrc name=usrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
@@ -264,7 +264,8 @@ int main( int argc, char** argv )
 			F.mf = dcvProcessStage ;
 			F.sf = stage2 ;
 			D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvTerminal") ;
-			g_object_set(G_OBJECT(D.dcv),"stage-function",gpointer(&F));
+			g_print("Setting execution function for %s\n",gst_element_get_name(D.dcv)) ;
+			g_object_set(G_OBJECT(D.dcv),"stage-function",gpointer(&F),NULL);
 		}
 
 	}
