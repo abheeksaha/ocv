@@ -76,7 +76,7 @@
 #include "rseq.h"
 #include "gstdcv.h"
 #include "gutils.hpp"
-#include "dsopencv.hpp"
+#include "dcvopencv.hpp"
 #define CV_WARN(...) CV_LOG_WARNING(NULL, "OpenCV | GStreamer warning: " << __VA_ARGS__)
 
 #define COLOR_ELEM "videoconvert"
@@ -453,6 +453,7 @@ gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
 	else return false ;
 }
 	
+#if 0
 int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 {
 	Mat gray;
@@ -618,6 +619,7 @@ void putFrameNum(Mat img, int fno)
 	sprintf(text,"fno=%d",fno) ;
 	putText(img, text, textOrg, fontFace, fontScale, Scalar::all(255), thickness, 8);
 }
+#endif
 	
 /** Main platform functions **/
 #define MAXSTAGEDATASIZE 16384

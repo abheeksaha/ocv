@@ -193,5 +193,5 @@ int dcvBufQInit(dcv_bufq_t *P)
 GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb)
 {
 	gst_dcv_stage_t *F = (gst_dcv_stage_t *)execFn ;
-	return F->mf(vbuf,gcaps,dbuf,df,F->sf,newvb) ;
+	return dcvProcessStage(vbuf,gcaps,dbuf,df,F->sf,newvb) ;
 }
