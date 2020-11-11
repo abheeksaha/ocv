@@ -304,6 +304,7 @@ using namespace std;
 void putFrameNum(Mat img, int fno) ;
 #include <vector>
 	/** Write a vector of points to an output array and vice versa **/
+#if 0
 int writeToArray(vector<Point> vlist, char *op, int opsize)
 {
 	char *pop = op ;
@@ -341,7 +342,7 @@ int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 }
 
 #ifdef FOESTAGE
-int writeToArrayContours(vector<vector<Point2f>> vlist, char *op, int opsize)
+static int writeToArrayContours(vector<vector<Point2f>> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
@@ -369,7 +370,7 @@ int writeToArrayContours(vector<vector<Point2f>> vlist, char *op, int opsize)
 // Entry can be a point or a list of points.
 // List of points are given with a starting [Size:]
 //
-int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
+static int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
 {
 	char *pop = op ;
 	char *tok ;
@@ -397,7 +398,7 @@ int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
 	return it ;
 }
 #ifdef FOESTAGE
-int readFromBufferContours(char *op, int sz, vector <vector<Point2f>> &pvlist)
+static int readFromBufferContours(char *op, int sz, vector <vector<Point2f>> &pvlist)
 {
 	char *pop = op ;
 	char *tok ;
@@ -426,8 +427,9 @@ int readFromBufferContours(char *op, int sz, vector <vector<Point2f>> &pvlist)
 	return it;
 }
 #endif
+#endif
 	
-gboolean frameToImg(GstBuffer *buf, GstCaps *caps, Mat *img, dcvFrameData_t *df)
+static gboolean frameToImg(GstBuffer *buf, GstCaps *caps, Mat *img, dcvFrameData_t *df)
 {
 	gboolean retval =  retrieveFrame(buf,caps,img, df);
 	return retval;
@@ -435,7 +437,7 @@ gboolean frameToImg(GstBuffer *buf, GstCaps *caps, Mat *img, dcvFrameData_t *df)
 	
 TermCriteria termcrit(TermCriteria::COUNT|TermCriteria::EPS,20,0.03);
 #define THRESH 1
-gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
+static gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
 {
 	float diff = 0 ;
 	vector<Point2f>::iterator it;
@@ -454,171 +456,6 @@ gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
 }
 	
 #if 0
-int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
-{
-	Mat gray;
-    	vector<Point2f> pointsg;
-    	Size subPixWinSize(10,10), winSize(31,31);
-	const int MAX_COUNT = 500 ;
-	int size=0;
-	static int count = 1 ;
-	{
-        	cvtColor(img, gray, COLOR_BGR2GRAY);
-		Mat edges(img.size(), CV_8U) ;
-		goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
-		if (pointsg.empty()) printf("No features to track\n") ;
-		else {
-			printf ("%d points to track\n",pointsg.size()) ;
-			cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
-		}
-
-		--count ;
-		if (count == 0) {
-			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
-			count = 2 ;
-		}
-		else
-		{
-			pointsg.resize(0) ;
-			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
-		}
-		if (dcvOptDebug) g_print("Stage1:return %d bytes\n",size) ;
-
-	}
-	return size;
-}
-	
-int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasize)
-{
-	vector<uchar> status;
-	vector<float> err;
-    	static vector<Point2f> pointsg;
-    	Size subPixWinSize(10,10), winSize(31,31);
-	static Mat gray;
-	static Mat prevGray ;
-	int nitems;
-	int i,size=0;
-	const int MAX_COUNT = 500 ;
-	static int fno=0;
-	
-        cvtColor(img, gray, COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
-	cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
-#if 0
-#endif
-        for( i = 0; i < pointsg.size(); i++ )
-        {
-              circle( img, pointsg[i], 4, Scalar(128,128,0), -1, 8);
-        }
-	putFrameNum(img, ++fno) ;
-	size = 0 ;
-	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
-	if (dcvOptDebug) g_print("Stagen:return %d bytes\n",size) ;
-//imshow...	
-	return size;
-}
-int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
-{
-	vector<uchar> status;
-	vector<float> err;
-    	static vector<vector<Point2f>> points(2);
-	Size winSize(31,31)  ;
-	static Mat gray;
-	static Mat prevGray ;
-	int nitems;
-	static int fno = 0 ;
-	int osize=0;
-	
-	if (points[1].size() == 0) 
-		points[1].resize(500) ;
-        cvtColor(img, gray, COLOR_BGR2GRAY);
-	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
-//	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
-	       g_print("Read from buffer failed\n")	;
-	       return -1 ;
-	}
-	else if (nitems == 0) if (dcvOptDebug) g_print("No new points, please carry on using old points\n") ;
-	if (!points[0].empty())
-        {
-		if(prevGray.empty())
-			img.copyTo(prevGray);
-            calcOpticalFlowPyrLK(prevGray, gray, points[0], points[1], status, err, winSize,
-                                 3, termcrit, 0, 0.001);
-	    if (dcvOptDebug) g_print("Optical flow computed\n") ;
-            size_t i, k;
-            for( i = k = 0; i < points[1].size(); i++ )
-            {
-                if( !status[i] )
-                    continue;
-	
-                points[1][k++] = points[1][i];
-                {
-            		int line_thickness = 4;
-			/* CV_RGB(red, green, blue) is the red, green, and blue components
-			 * of the color you want, each out of 255.  */	
-
-			cv::Scalar line_color = CV_RGB(0,0,255);
-			CvPoint p,q;
-			p.x = (int) points[0][i].x;
-			p.y = (int) points[0][i].y;
-			q.x = (int) points[1][i].x;
-			q.y = (int) points[1][i].y;
-			double angle;		angle = atan2( (double) p.y - q.y, (double) p.x - q.x );
-			double hypotenuse;	hypotenuse = sqrt( pow(p.y - q.y,2.0) + pow(p.x - q.x,2.0) );
-			/* Here we lengthen the arrow by a factor of three. */
-			q.x = (int) (p.x - 3 * hypotenuse * cos(angle));
-			q.y = (int) (p.y - 3 * hypotenuse * sin(angle));
-			/* Now we draw the main line of the arrow. */
-			/* "frame1" is the frame to draw on.
-			 * "p" is the point where the line begins.  "q" is the point where the line stops.
-			 * "CV_AA" means antialiased drawing.  "0" means no fractional bits in the center cooridinate or radius.
-			 */
-			line( img, p, q, line_color, line_thickness, 16 ,0 );   
-			/** Arrow tips **/
-			p.x = (int) (q.x + 9 * cos(angle + M_PI / 4));
-			p.y = (int) (q.y + 9 * sin(angle + M_PI / 4));
-			line( img, p, q, line_color, line_thickness, 16, 0 );
-			p.x = (int) (q.x + 9 * cos(angle - M_PI / 4));
-			p.y = (int) (q.y + 9 * sin(angle - M_PI / 4));
-			line( img, p, q, line_color, line_thickness, 16, 0 );
-		}
-            }
-            points[1].resize(k);
-            points[0].resize(k);
-	}
-	putFrameNum(img,++fno) ;
-	if (dataout != NULL) {
-		osize = writeToArrayContours(points,dataout,outdatasize) ;
-		g_print("Stage 2 returns %d bytes\n",osize) ;
-	}
-//imshow...	
-	swap(points[1], points[0]);
-	swap(prevGray, gray);
-	return osize;
-}
-
-void putFrameNum(Mat img, int fno)
-{
-	char text[24] ;
-	int fontFace = FONT_HERSHEY_SCRIPT_SIMPLEX;
-	double fontScale = 1.5;
-	int thickness = 3;
-	int baseline=0;
-	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
-	baseline += thickness;
-// center the text
-	Point textOrg((img.cols - textSize.width)/2, (img.rows + textSize.height)/2);
-
-// draw the box
-	rectangle(img, textOrg + Point(0, baseline), textOrg + Point(textSize.width, -textSize.height), Scalar(0,0,255));
-
-// ... and the baseline first
-	line(img, textOrg + Point(0, thickness), textOrg + Point(textSize.width, thickness), Scalar(0, 0, 255));
-
-// then put the text itself
-	sprintf(text,"fno=%d",fno) ;
-	putText(img, text, textOrg, fontFace, fontScale, Scalar::all(255), thickness, 8);
-}
 #endif
 	
 /** Main platform functions **/
@@ -648,13 +485,16 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 		{
 			char *op = odmap.data ;
 			op += getTagSize() ;
-			size  = stage(img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
+			if (stage) size  = stage(img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
+			else size = 0 ;
 			gst_memory_unmap(odmem,&odmap) ;
 		}
 	}
-	else {
+	else if (stage != NULL){
 		size = stage((cv::Mat)img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
 	}
+	else
+		size = 0 ;
 	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
 	
 	if (size > 0)

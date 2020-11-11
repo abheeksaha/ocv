@@ -95,6 +95,8 @@ typedef struct
   GstCollectData collect;       /* we extend the CollectData */
 
   gboolean have_type;
+  gchar padname[24] ;           /* Name the pad **/
+  guint txsize ;
   GstSegment segment;
 
   GstBuffer *buffer;            /* the first waiting buffer for the pad */

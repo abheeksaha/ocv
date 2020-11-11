@@ -68,14 +68,14 @@ extern void walkPipeline(GstBin *bin) ;
 volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
 static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
-			  rtpmux name=mux ! queue ! appsink name=usink \
+			  dcvrtpmux name=mux ! queue %s ! appsink name=usink \
 			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
 			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
-		       rtph264depay name=rtpvsdp ! queue ! tee name=tpoint \
+		       rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint \
 			  rtpmux name=mux ! queue ! appsink  name=usink \
 			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! appsink name=vsink \
 			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
@@ -149,14 +149,17 @@ int main( int argc, char** argv )
 	gboolean intel_platform= false;
 	char graphfile[1024] ; 
 	gboolean graphdump = false ;
+	char qarg[1024] ;
 
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
+	sprintf(qarg,"") ;
 	static struct option longOpts[] = {
 		{ "help", no_argument, 0, 'h' },
 		{ "localDisplay", required_argument, 0, 'l' },
 		{ "debug", required_argument, 0, 'd' },
 		{ "intel-edge", no_argument, 0, 'e' },
+		{ "queue", required_argument, 0, 'q' },
 		{ "graphdump", required_argument, 0, 'G' },
 		{ 0,0,0,0 }} ;
 	int longindex;
@@ -184,6 +187,9 @@ int main( int argc, char** argv )
 		if (ch == 'G') {
 			graphdump = true ;
 			strncpy(graphfile,optarg,1023) ;
+		}
+		if (ch == 'q') {
+			strcpy(qarg,optarg) ;
 		}
 
 	}
@@ -214,10 +220,10 @@ int main( int argc, char** argv )
 
 	
 	if (localdisplay) {
-		sprintf(pipedesc,pdesc,"autovideosink") ;
+		sprintf(pipedesc,pdesc,qarg,"autovideosink") ;
 	}
 	else {
-		sprintf(pipedesc,pdesc,"fakesink") ;
+		sprintf(pipedesc,pdesc,qarg,"fakesink") ;
 	}
 
 	

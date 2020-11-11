@@ -258,6 +258,7 @@ gst_dcv_init (Gstdcv * filter)
   filter->execFn = NULL ;
   filter->grcvrMode = GRCVR_LAST ;
   filter->vcaps = filter->dcaps = NULL ;
+  filter->dcvDataRx = filter->dcvVideoRx = 0;
   dcvBufQInit(&filter->Q.dataqueue) ;
   dcvBufQInit(&filter->Q.olddataqueue) ;
   dcvBufQInit(&filter->Q.videoframequeue) ;
@@ -292,11 +293,14 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 			dataFrameContainer = NULL ; 
 	}
 	else if ( (dataFrameContainer = (dcv_BufContainer_t *)g_queue_pop_head(pd->olddataqueue.bufq)) == NULL) {
+		
 		       return -1 ;
 	}
 
 	else if ( ((filter->vfmatch = dcvFindMatchingContainer(pd->videoframequeue.bufq,dataFrameContainer,&T)) == -1) ) {
-		g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
+		g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
+				g_queue_get_length(pd->videoframequeue.bufq), 
+				g_queue_get_length(pd->olddataqueue.bufq)) ;
 #if 1
 		if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
 				dcvBufContainerFree(dataFrameContainer) ;
@@ -326,8 +330,8 @@ GRCVR_PROCESS:
 			else 
 #endif
 			{
-			g_print("dcvTerminal: Bypassing video frame processing\n") ;
-				newVideoFrame = gst_buffer_copy(videoFrameWaiting) ;
+				g_print("dcvTerminal: Bypassing video frame processing\n") ;
+				newDataFrame = dcvProcessFn( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, NULL, &newVideoFrame ) ;
 			}
 			if (gst_pad_is_linked(filter->video_out))
 			{
@@ -473,7 +477,14 @@ gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf)
   ld.caps = gst_pad_get_current_caps(pad) ;
 
   if (filter->silent == FALSE)
-    g_print ("DCV Video frame rx:caps %s\n",gst_caps_to_string(ld.caps));
+  {
+    g_print ("DCV Video frame rx: (%d) ", filter->dcvVideoRx) ;
+    if (filter->dcvVideoRx == 0)
+	g_print ("caps %s\n",gst_caps_to_string(ld.caps));
+    else
+	g_print ("\n") ;
+  }
+  filter->dcvVideoRx++ ;
   filter->vcaps = ld.caps ;
 
   if (sink_pushbufferToQueue(buf,&ld) ) {
@@ -493,8 +504,13 @@ gst_dcv_chain_gst (GstPad * pad, GstObject * parent, GstBuffer * buf)
   ld.caps = gst_pad_get_current_caps(pad) ;
 
   if (filter->silent == FALSE)
-    g_print ("DCV Data frame rx:caps %s\n",gst_caps_to_string(ld.caps));
+  {
+    g_print ("DCV Data frame rx: (%d) ", filter->dcvDataRx) ;
+    if (filter->dcvDataRx == 0) g_print("caps %s\n",gst_caps_to_string(ld.caps));
+    else g_print("\n") ;
+  }
   filter->dcaps = ld.caps ;
+  filter->dcvDataRx++ ;
 
   if (sink_pushbufferToQueue(buf,&ld) ) {
 	  dcvProcessQueuesDcv(filter) ;

@@ -74,6 +74,7 @@ enum
 #define DEFAULT_SEQNUM_OFFSET    -1
 #define DEFAULT_SSRC             -1
 
+static GstDcvRtpPadData *dcvpad[32] ;
 static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
@@ -101,7 +102,9 @@ static gboolean gst_dcv_rtp_mux_flush(GstCollectPads * pads,gpointer pdata) ;
 static gboolean gst_dcv_rtp_mux_sink_event (GstCollectPads * pads, GstCollectData * pad, GstEvent * event, gpointer pdata);
 static gboolean gst_dcv_rtp_mux_sink_query (GstCollectPads * pad, GstCollectData * cdata, GstQuery * query, gboolean discard);
 static GstFlowReturn 
-gst_dcv_rtp_mux_collected (GstCollectPads * pads, GstCollectData * Data, GstBuffer * buffer, GstDcvRTPMux * dcv_mux) ;
+gst_dcv_rtp_mux_buffer_collected (GstCollectPads * pads, GstCollectData * Data, GstBuffer * buffer, GstDcvRTPMux * dcv_mux) ;
+static GstFlowReturn 
+gst_dcv_rtp_mux_collected (GstCollectPads * pads, GstDcvRTPMux * dcv_mux) ;
 
 static GstStateChangeReturn gst_dcv_rtp_mux_change_state (GstElement *
     element, GstStateChange transition);
@@ -277,7 +280,8 @@ gst_dcvrtp_mux_init (GstDcvRTPMux * dcv_rtp_mux)
   dcv_rtp_mux->last_stop = GST_CLOCK_TIME_NONE;
 
   dcv_rtp_mux->sinkpads = gst_collect_pads_new() ;
-  gst_collect_pads_set_buffer_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_collected),dcv_rtp_mux);
+  gst_collect_pads_set_buffer_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_buffer_collected),dcv_rtp_mux);
+  gst_collect_pads_set_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_collected),dcv_rtp_mux);
   gst_collect_pads_set_event_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_sink_event),dcv_rtp_mux);
   gst_collect_pads_set_flush_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_flush),dcv_rtp_mux);
 }
@@ -291,26 +295,25 @@ gst_dcv_rtp_mux_pad_destroy_notify (GstCollectData * data)
 static void
 gst_rtp_mux_setup_sinkpad (GstDcvRTPMux * rtp_mux, GstPad * sinkpad)
 {
-#if 0
   GstDcvRTPMuxPadPrivate *padpriv = g_slice_new0 (GstDcvRTPMuxPadPrivate);
 
   /* setup some pad functions */
   
+#if 0
   gst_pad_set_chain_list_function (sinkpad,
       GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_chain_list_collected));
   gst_pad_set_event_function (sinkpad,
       GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_sink_event));
   gst_pad_set_query_function (sinkpad,
       GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_sink_query));
+#endif
 
 
   gst_pad_set_element_private (sinkpad, padpriv);
-
   gst_pad_set_active (sinkpad, TRUE);
-  gst_collect_pads_add_pad (rtp_mux->sinkpads, sinkpad,
-          sizeof (GstDcvRtpPadData), gst_dcv_rtp_mux_dcv_pad_destroy_notify, FALSE);
-      dcv_mux->active_pads++;
-#endif
+  //gst_collect_pads_add_pad (rtp_mux->sinkpads, sinkpad,
+   //      sizeof (GstDcvRtpPadData), gst_dcv_rtp_mux_pad_destroy_notify, FALSE);
+//      rtp_mux->active_pads++;
 }
 
 static GstPad *
@@ -330,16 +333,31 @@ gst_dcv_rtp_mux_request_new_pad (GstElement * element,
     GST_WARNING_OBJECT (dcv_rtp_mux, "request pad that is not a SINK pad");
     return NULL;
   }
+  else if (req_name == NULL)
+  {
+	  GST_LOG_OBJECT(dcv_rtp_mux, "request pad name is null:\n") ;
+	  return NULL ;
+  }
+  else if (strcmp(req_name,"sink_0") && strcmp(req_name, "sink_1")) {
+	  GST_LOG_OBJECT(dcv_rtp_mux, "request pad name is wierd:%s\n",req_name) ;
+	  return NULL ;
+  }
 
   newpad = gst_pad_new_from_template (templ, req_name);
   if (newpad)
   {
-	GstDcvRtpPadData *dcvpad = (GstDcvRtpPadData *)gst_collect_pads_add_pad(dcv_rtp_mux->sinkpads,newpad,
-			  sizeof(GstDcvRtpPadData), gst_dcv_rtp_mux_pad_destroy_notify, FALSE) ;
 
-	dcv_rtp_mux->active_pads++ ;
     	gst_rtp_mux_setup_sinkpad (dcv_rtp_mux, newpad);
+	dcv_rtp_mux->active_pads++ ;
 	gst_element_add_pad(element,newpad) ;
+	dcvpad[dcv_rtp_mux->active_pads] = 
+		(GstDcvRtpPadData *)gst_collect_pads_add_pad(dcv_rtp_mux->sinkpads,newpad,
+			  sizeof(GstDcvRtpPadData), gst_dcv_rtp_mux_pad_destroy_notify, FALSE) ;
+	strncpy(dcvpad[dcv_rtp_mux->active_pads]->padname , req_name, 20) ;
+	dcvpad[dcv_rtp_mux->active_pads]->txsize = 0 ;
+	dcv_rtp_mux->active_pads++ ;
+	GST_LOG_OBJECT(dcv_rtp_mux,"Added new pad :%s, active pads=%u\n",
+			gst_pad_get_name(newpad),dcv_rtp_mux->active_pads) ;
   }
   else
     GST_WARNING_OBJECT (dcv_rtp_mux, "failed to create request pad");
@@ -930,10 +948,11 @@ static gboolean
 gst_dcv_rtp_mux_sink_event (GstCollectPads * pads, GstCollectData * pad, GstEvent * event, gpointer pdata)
 {
   GstDcvRTPMux *mux = GST_DCV_RTP_MUX (pdata);
+  GstDcvRtpPadData *dcv_pad = (GstDcvRtpPadData *) pad;
   gboolean ret;
 
-  GST_LOG_OBJECT (pad->pad, "Got %s event", GST_EVENT_TYPE_NAME (event));
-  GST_LOG_OBJECT(mux, "sink pad status:%u src pad active:%s\n",
+  GST_LOG_OBJECT (pad->pad, "Got %s event: sink pad status:%u src pad active:%s\n",
+		  GST_EVENT_TYPE_NAME (event),
 		  GST_COLLECT_PADS_STATE(mux->sinkpads),
 		  gst_pad_is_active(mux->srcpad) ? "Yes":"No") ;
 #if 1
@@ -951,19 +970,46 @@ gst_dcv_rtp_mux_sink_event (GstCollectPads * pads, GstCollectData * pad, GstEven
       gst_event_unref (event);
       return ret;
     }
+    case GST_EVENT_SEGMENT:
+    {
+      const GstSegment *segment;
+
+      gst_event_parse_segment (event, &segment);
+      GST_LOG_OBJECT(mux,"Received segment, format=%u\n",segment->format) ;
+
+#if 0
+      /* We don't support non time NEWSEGMENT events */
+      if (segment->format != GST_FORMAT_TIME) {
+        gst_event_unref (event);
+        event = NULL;
+        break;
+      }
+#endif
+
+      gst_segment_copy_into (segment, &dcv_pad->segment);
+      break;
+    }
     case GST_EVENT_FLUSH_STOP:
     {
       break;
+    }
+    case GST_EVENT_STREAM_START:
+    {
+	    ret = gst_collect_pads_event_default(pads,pad,event,FALSE) ;
+	    GST_LOG_OBJECT(pad->pad, "Processing stream start event by dropping: ret=%ui collect pads state=%u\n",
+			    ret, GST_COLLECT_PADS_STATE(mux->sinkpads)) ;
+	    gst_event_unref(event) ;
+	    return TRUE ;
     }
     default:
       break;
   }
 #endif
-  if (mux->srcpad) {
-    return gst_pad_push_event (mux->srcpad, event);
-  } else {
+  //if (mux->srcpad) {
+   //return gst_pad_push_event (mux->srcpad, event);
+  // else {
     return gst_collect_pads_event_default (pads, pad, event, FALSE);
-  }
+  //
 }
 
 static void
@@ -1045,11 +1091,77 @@ gst_dcvrtp_mux_plugin_init (GstPlugin * plugin)
       GST_TYPE_DCV_RTP_MUX);
 }
 
+GstFlowReturn
+gst_dcv_rtp_mux_collected (GstCollectPads * pads, GstDcvRTPMux * dcv_mux)
+{
+  GST_LOG_OBJECT (dcv_mux, "collected");
+  GstBuffer *inbuf;
+  GstCollectData *collect_data = NULL;
+  guint outsize = 0;
+  GSList *walk;
+  gboolean eos=true ;
+  GstFlowReturn retval = GST_FLOW_OK ;
+  static guint nextpad = 0 ;
+  guint testpad = 0;
+  char *padname = (nextpad == 0 ? "sink_0" : "sink_1") ;
+
+  g_print("nextpad=%u max=%u\n",nextpad,dcv_mux->active_pads) ;
+  walk = pads->data;
+  for (walk = pads->data; walk; walk = walk->next,testpad++) {
+    GstDcvRtpPadData *pdata = (GstDcvRtpPadData *)walk->data ;
+    GstCollectData *tmp = (GstCollectData *) walk->data;
+    
+    g_print("Trying pad :%s\n",pdata->padname) ;
+    if (tmp->buffer) {
+	eos = false ;
+	g_print("dcv_rtp_mux:found buffer in %u, (%s,%s)\n",nextpad,pdata->padname,padname) ;
+	if (gst_pad_is_blocking(dcv_mux->srcpad)) {
+		g_print("Outbound pad is blocking\n") ;
+	}
+	if (strcmp(pdata->padname,padname)) continue ;
+      	collect_data = tmp;
+  	outsize = gst_buffer_get_size (collect_data->buffer);
+  	inbuf = gst_collect_pads_take_buffer (pads, collect_data, outsize);
+  	GST_LOG_OBJECT (dcv_mux, "forward buffer %p\n", inbuf);
+	pdata->txsize += gst_buffer_get_size(inbuf) ;
+  	g_print ("dcv_rtp_mux:forward buffer %p: total tx size=%u\n", inbuf,pdata->txsize);
+  	retval = gst_pad_push (dcv_mux->srcpad, inbuf);
+	nextpad = (nextpad+1)%2 ;
+	return retval ;
+    }
+  }
+
+  /* can only happen when no pads to collect or all EOS */
+  if (eos == false)
+	  return retval ;
+
+#if 0
+  if (dcv_mux->first) {
+    GstSegment segment;
+
+    gst_segment_init (&segment, GST_FORMAT_BYTES);
+    gst_pad_push_event (aggregator->srcpad,
+        gst_event_new_stream_start ("test"));
+    gst_pad_push_event (aggregator->srcpad, gst_event_new_segment (&segment));
+    aggregator->first = FALSE;
+  }
+#endif
+
+  /* just forward the first buffer */
+  /* ERRORS */
+eos:
+  {
+    GST_DEBUG_OBJECT (dcv_mux, "no data available, must be EOS");
+    gst_pad_push_event (dcv_mux->srcpad, gst_event_new_eos ());
+    return GST_FLOW_EOS;
+  }
+}
 static GstFlowReturn
-gst_dcv_rtp_mux_collected (GstCollectPads * pads, GstCollectData * Data, GstBuffer * buffer, GstDcvRTPMux * dcv_mux)
+gst_dcv_rtp_mux_buffer_collected (GstCollectPads * pads, GstCollectData * Data, GstBuffer * buffer, GstDcvRTPMux * dcv_mux)
 {
 
-  GST_LOG_OBJECT (dcv_mux, "collected");
+  GST_LOG_OBJECT (dcv_mux, "buffer collected");
+  gst_buffer_unref(buffer) ;
   return GST_FLOW_OK;
 }
 /* PACKAGE: this is usually set by meson depending on some _INIT macro

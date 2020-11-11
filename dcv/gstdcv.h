@@ -113,6 +113,8 @@ struct _Gstdcv
   GstCaps *vcaps ;
   GstCaps *dcaps ;
   dcvFrameData_t Dv ;
+  gint    dcvVideoRx ;
+  gint    dcvDataRx ; 
   dcv_data_struct_t Q ;
 } ;
 

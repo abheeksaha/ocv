@@ -261,7 +261,6 @@ int main( int argc, char** argv )
 		}
 		{
 			gst_dcv_stage_t F ;
-			F.mf = dcvProcessStage ;
 			F.sf = stage2 ;
 			D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvTerminal") ;
 			g_print("Setting execution function for %s\n",gst_element_get_name(D.dcv)) ;

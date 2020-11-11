@@ -18,8 +18,11 @@ OLIBDIR = /home/ggne0015/src/opencv-4.1.1/build/lib
 .c.o:
 	$(CPP) $(CPPFLAGS) -fPIC -c $*.c
 
+all: dcv.so dcvrtpmux.so
 DCVDEPFILES = gstdcv.o dcvutils.o dcvopencv.o
 dcv.so: $(DCVDEPFILES)
 	$(CPP) --shared -o dcv.so $(DCVDEPFILES) -lopencv_world -lm
 
-all: dcv.so
+dcvrtpmux.so: gstdcvrtpmux.o
+	$(CPP) --shared -o dcvrtpmux.so gstdcvrtpmux.o -lgstrtp-1.0
+
