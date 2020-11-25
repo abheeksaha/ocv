@@ -67,12 +67,13 @@ extern void walkPipeline(GstBin *bin) ;
 
 volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
-static char fdesc[] = "filesrc name=fsrc ! queue ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
-			  dcvrtpmux name=mux ! queue %s ! appsink name=usink \
-			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
-			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
+
+static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
+			  dcvrtpmux name=mux ! queue name=usq  ! appsink name=usink \
+			  tpoint.src_0 ! queue name=t1 ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
+			  tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=t2 ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
-			  appsrc name=dsrc ! queue ! rtpgstpay name=rgpy ! mux.sink_1";
+			  appsrc name=dsrc ! queue name=dsq ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
 		       rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint \
@@ -220,10 +221,10 @@ int main( int argc, char** argv )
 
 	
 	if (localdisplay) {
-		sprintf(pipedesc,pdesc,qarg,"autovideosink") ;
+		sprintf(pipedesc,pdesc,"autovideosink") ;
 	}
 	else {
-		sprintf(pipedesc,pdesc,qarg,"fakesink") ;
+		sprintf(pipedesc,pdesc,"fakesink") ;
 	}
 
 	
@@ -241,6 +242,7 @@ int main( int argc, char** argv )
 	}
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.tpt  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint") ;
+	g_object_set(D.tpt,"silent",false, NULL) ;
 	D.vsd  = gst_bin_get_by_name(GST_BIN(D.pipeline),"vsd") ;
 	if (inputfromnet == FALSE) D.mdmx  = gst_bin_get_by_name(GST_BIN(D.pipeline),"mdmx") ;
 	else D.mdmx = NULL ;
@@ -301,12 +303,14 @@ int main( int argc, char** argv )
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"mux") ; g_assert(ge) ;
 			GstCaps *t,*u;
+#if 0
 	  		rtpsink1 = gst_element_get_request_pad(ge, "sink_%u") ;
 	  		rtpsink2 = gst_element_get_request_pad(ge, "sink_%u") ;
 			t = gst_pad_query_caps(rtpsink1,NULL) ;
 			u = gst_pad_query_caps(rtpsink2,NULL) ;
 			g_print("rtpsink1 likes caps: %s\n", gst_caps_to_string(t)) ;
 			g_print("rtpsink2 likes caps: %s\n", gst_caps_to_string(u)) ;
+#endif
 		}
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"vppy") ; g_assert(ge) ;
@@ -399,9 +403,37 @@ int main( int argc, char** argv )
 		static guint notprocessed = 6 ;
 
 		if (terminate == FALSE) 
-			terminate = listenToBus(D.pipeline,&newstate,&oldstate,20) ;
+			terminate = listenToBus(D.pipeline,&newstate,&oldstate,50) ;
 
 		ctr++ ;
+		if (ctr == 40) {
+			guint currentBytes,currentTime ;
+			gchar *lmsg;
+			GST_WARNING("D.dsrcstate.state == %s, dq status = %s\n",
+				D.dsrcstate.state == G_WAITING? "wait":"empty",
+				g_queue_is_empty(D.dq.bufq) ? "empty" : "full") ;
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"fq"),
+					"current-level-bytes", &currentBytes,
+					"current-level-time", &currentTime, NULL) ;
+			GST_WARNING("FQ: Backlog  %u, %u\n",currentBytes,currentTime) ;
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"t1"),
+					"current-level-bytes", &currentBytes,
+					"current-level-time", &currentTime, NULL) ;
+			GST_WARNING("T1: Backlog  %u, %u\n",currentBytes,currentTime) ;
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"t2"),
+					"current-level-bytes", &currentBytes,
+					"current-level-time", &currentTime, NULL) ;
+			GST_WARNING("T2: Backlog  %u, %u\n",currentBytes,currentTime) ;
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"dsq"),
+					"current-level-bytes", &currentBytes,
+					"current-level-time", &currentTime, NULL) ;
+			GST_WARNING("DSQ: Backlog  %u, %u\n",currentBytes,currentTime) ;
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint"),
+					"last-message", &lmsg, NULL) ;
+			GST_WARNING("Tpoint: Last message %s\n",lmsg) ;
+			ctr = 0;
+		}
+			
 		if (newstate >= GST_STATE_READY) {
 			while (D.dsrcstate.state == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
 				dcv_BufContainer_t *dv ;

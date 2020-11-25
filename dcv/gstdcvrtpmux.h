@@ -1,11 +1,32 @@
-/* RTP muxer element for GStreamer
+/*
+ * GStreamer
+ * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
+ * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
+ * Copyright (C) 2020 Niels De Graef <niels.degraef@gmail.com>
+ * Copyright (C) 2020 Abheek Saha <<user@hostname.org>>
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * gstrtpmux.h:
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
- * Copyright (C) <2007> Nokia Corporation.
- *   Contact: Zeeshan Ali <zeeshan.ali@nokia.com>
- * Copyright (C) 1999,2000 Erik Walthinsen <omega@cse.ogi.edu>
- *               2000,2005 Wim Taymans <wim@fluendo.com>
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Alternatively, the contents of this file may be used under the
+ * GNU Lesser General Public License Version 2.1 (the "LGPL"), in
+ * which case the following provisions apply instead of the ones
+ * mentioned above:
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,129 +40,62 @@
  *
  * You should have received a copy of the GNU Library General Public
  * License along with this library; if not, write to the
- * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef __GST_DCV_RTP_MUX_H__
-#define __GST_DCV_RTP_MUX_H__
+#ifndef __GST_DCVRTPMUX_H__
+#define __GST_DCVRTPMUX_H__
 
+#include <sys/time.h>
 #include <gst/gst.h>
-#include <gst/rtp/gstrtpbuffer.h>
-#include <gst/base/gstcollectpads.h>
 
 G_BEGIN_DECLS
-#define GST_TYPE_DCV_RTP_MUX (gst_dcvrtp_mux_get_type())
-#define GST_DCV_RTP_MUX(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DCV_RTP_MUX, GstDcvRTPMux))
-#define GST_DCV_RTP_MUX_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_DCV_RTP_MUX, GstDvvRTPMuxClass))
-#define GST_DCV_RTP_MUX_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj), GST_TYPE_DCV_RTP_MUX, GstDcvRTPMuxClass))
-#define GST_IS_DCV_RTP_MUX(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_DCV_RTP_MUX))
-#define GST_IS_DCV_RTP_MUX_CLASS(obj) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_DCV_RTP_MUX))
-typedef struct _GstDcvRTPMux GstDcvRTPMux;
-typedef struct _GstDcvRTPMuxClass GstDcvRTPMuxClass;
+
+#define GST_TYPE_DCVRTPMUX (gst_dcvrtpmux_get_type())
+G_DECLARE_FINAL_TYPE (Gstdcvrtpmux, gst_dcvrtpmux,
+    GST, PLUGIN_TEMPLATE, GstElement)
 
 
-typedef struct
-{
-  gboolean have_timestamp_offset;
-  guint timestamp_offset;
+typedef struct {
+	GQueue *bufq;
+	struct timeval lastData;
+	struct timezone tz;
+	int entries ;
+} dcvrtpmux_bufq_t ;
 
-  GstSegment segment;
+typedef struct {
+	dcvrtpmux_bufq_t pD ;
+	GstCaps * caps ;
+} dcvrtpmux_bufq_loc_t  ;
 
-  gboolean priority;
-} GstDcvRTPMuxPadPrivate;
+typedef struct {
+	GstBuffer *nb;
+	GstCaps *caps;
+	struct timeval ctime;
+	struct timezone ctz;
+} dcvrtpmux_BufContainer_t ;
 
-
-/**
- * GstRTPMux:
- *
- * The opaque #GstRTPMux structure.
- */
-struct _GstDcvRTPMux
+typedef struct _Gstdcvrtpmux
 {
   GstElement element;
 
-  /* sinkpads **/
-  GstCollectPads *sinkpads;
-  /* srcpad */
   GstPad *srcpad;
-  guint active_pads;
+  GstPad *sinkpads[24] ;
+  guint nsinks ;
+  gboolean silent;
+  guint dcvrtpmux_nf ;
+  dcvrtpmux_bufq_loc_t padq[24] ;
+} GstDcvRtpMux_t ;
 
-  guint32 ts_base;
-  guint16 seqnum_base;
+#define GST_DCVRTPMUX(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DCVRTPMUX,Gstdcvrtpmux))
+#define GST_DCVRTPMUX_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_DCVRTPMUX,GstdcvrtpmuxClass))
+#define GST_IS_DCVRTPMUX(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_DCVRTPMUX))
+#define GST_IS_DCVRTPMUX_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_DCVRTPMUX))
 
-  gint32 ts_offset;
-  gint16 seqnum_offset;
-  guint16 seqnum;               /* protected by object lock */
-  guint ssrc;
-  guint current_ssrc;
-  gboolean have_ssrc;
-
-  GstPad *last_pad; /* protected by object lock */
-
-  GstClockTime last_stop;
-  gboolean send_stream_start;
-};
-
-typedef enum
-{
-  GST_DCV_RTP_PAD_STATE_CONTROL = 0,
-  GST_DCV_RTP_PAD_STATE_DATA = 1
-}
-GstDcvRtpPadState;
-
-typedef struct
-{
-  GstCollectData collect;       /* we extend the CollectData */
-
-  gboolean have_type;
-  gchar padname[24] ;           /* Name the pad **/
-  guint txsize ;
-  GstSegment segment;
-
-  GstBuffer *buffer;            /* the first waiting buffer for the pad */
-
-  gint64 packetno;              /* number of next packet */
-  gint64 pageno;                /* number of next page */
-  guint64 duration;             /* duration of current page */
-  gboolean eos;
-  gint64 offset;
-  GstClockTime timestamp;       /* timestamp of the first packet on the next
-                                 * page to be dequeued */
-  GstClockTime timestamp_end;   /* end timestamp of last complete packet on
-                                   the next page to be dequeued */
-  GstClockTime gp_time;         /* time corresponding to the gp value of the
-                                   last complete packet on the next page to be
-                                   dequeued */
-
-  GstDcvRtpPadState state;         /* state of the pad */
-
-  GQueue *pagebuffers;          /* List of pages in buffers ready for pushing */
-
-  gboolean new_page;            /* starting a new page */
-  gboolean first_delta;         /* was the first packet in the page a delta */
-  gboolean prev_delta;          /* was the previous buffer a delta frame */
-  gboolean data_pushed;         /* whether we pushed data already */
-
-  gint64  next_granule;         /* expected granule of next buffer ts */
-  gint64  keyframe_granule;     /* granule of last preceding keyframe */
-
-  GstTagList *tags;
-}
-GstDcvRtpPadData;
-struct _GstDcvRTPMuxClass
-{
-  GstElementClass parent_class;
-
-  gboolean (*accept_buffer_locked) (GstDcvRTPMux *rtp_mux,
-      GstDcvRTPMuxPadPrivate * padpriv, GstRTPBuffer * buffer);
-
-  gboolean (*src_event) (GstDcvRTPMux *rtp_mux, GstEvent *event);
-};
-
-
-GType gst_dcvrtp_mux_get_type (void);
-gboolean gst_dcvrtp_mux_plugin_init (GstPlugin * plugin);
-
+static int dcvrtpmuxProcessQueuesDcv(Gstdcvrtpmux * filter) ;
+/* Standard function returning type information. */
+GType gst_my_filter_get_type (void);
 G_END_DECLS
-#endif /* __GST_RTP_MUX_H__ */
+
+#endif /* __GST_DCV_H__ */

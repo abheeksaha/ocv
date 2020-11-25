@@ -1,13 +1,31 @@
-/* RTP muxer element for GStreamer
+/*
+ * GStreamer
+ * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
+ * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
+ * Copyright (C) 2020 Abheek Saha <<user@hostname.org>>
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * gstrtpmux.c:
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
- * Copyright (C) <2007-2010> Nokia Corporation.
- *   Contact: Zeeshan Ali <zeeshan.ali@nokia.com>
- * Copyright (C) <2007-2010> Collabora Ltd
- *   Contact: Olivier Crete <olivier.crete@collabora.co.uk>
- * Copyright (C) 1999,2000 Erik Walthinsen <omega@cse.ogi.edu>
- *               2000,2005 Wim Taymans <wim@fluendo.com>
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Alternatively, the contents of this file may be used under the
+ * GNU Lesser General Public License Version 2.1 (the "LGPL"), in
+ * which case the following provisions apply instead of the ones
+ * mentioned above:
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,109 +39,85 @@
  *
  * You should have received a copy of the GNU Library General Public
  * License along with this library; if not, write to the
- * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 /**
- * SECTION:element-rtpmux
- * @see_also: rtpdtmfmux
+ * SECTION:element-dcv
  *
- * The rtp muxer takes multiple RTP streams having the same clock-rate and
- * muxes into a single stream with a single SSRC.
+ * FIXME:Describe dcv here.
  *
  * <refsect2>
- * <title>Example pipelines</title>
+ * <title>Example launch line</title>
  * |[
- * gst-launch-1.0 rtpmux name=mux ! udpsink host=127.0.0.1 port=8888        \
- *              alsasrc ! alawenc ! rtppcmapay !                        \
- *              application/x-rtp, payload=8, rate=8000 ! mux.sink_0    \
- *              audiotestsrc is-live=1 !                                \
- *              mulawenc ! rtppcmupay !                                 \
- *              application/x-rtp, payload=0, rate=8000 ! mux.sink_1
+ * gst-launch -v -m fakesrc ! dcv ! fakesink silent=TRUE
  * ]|
- * In this example, an audio stream is captured from ALSA and another is
- * generated, both are encoded into different payload types and muxed together
- * so they can be sent on the same port.
  * </refsect2>
  */
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+#  include <config.h>
 #endif
 
+#include <sys/time.h>
 #include <gst/gst.h>
-#include <gst/rtp/gstrtpbuffer.h>
-#include <string.h>
-
+#include <gst/app/app.h>
 #include "gstdcvrtpmux.h"
 
-GST_DEBUG_CATEGORY_STATIC (gst_dcv_rtp_mux_debug);
-#define GST_CAT_DEFAULT gst_dcv_rtp_mux_debug
+GST_DEBUG_CATEGORY_STATIC (gst_dcvrtpmux_debug);
+#define GST_CAT_DEFAULT gst_dcvrtpmux_debug
+
+/* Filter signals and args */
+enum
+{
+  /* FILL ME */
+  LAST_SIGNAL
+};
 
 enum
 {
   PROP_0,
-  PROP_TIMESTAMP_OFFSET,
-  PROP_SEQNUM_OFFSET,
-  PROP_SEQNUM,
-  PROP_SSRC
+  PROP_SILENT,
+  PROP_DCV_MODE
 };
+#define MAX_STAY 1
 
-#define DEFAULT_TIMESTAMP_OFFSET -1
-#define DEFAULT_SEQNUM_OFFSET    -1
-#define DEFAULT_SSRC             -1
-
-static GstDcvRtpPadData *dcvpad[32] ;
-static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
-    GST_PAD_SRC,
-    GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("application/x-rtp")
-    );
-
+/* the capabilities of the inputs and outputs.
+ *
+ * describe the real formats here.
+ */
 static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink_%u",
     GST_PAD_SINK,
     GST_PAD_REQUEST,
     GST_STATIC_CAPS ("application/x-rtp")
     );
 
-static GstPad *gst_dcv_rtp_mux_request_new_pad (GstElement * element,
-    GstPadTemplate * templ, const gchar * name, const GstCaps * caps);
-static void gst_dcv_rtp_mux_release_pad (GstElement * element, GstPad * pad);
+static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
+    GST_PAD_SRC,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS ("application/x-rtp")
+    );
 
-static GstFlowReturn gst_dcv_rtp_mux_collect(GstCollectPads *sinkpads, GstDcvRTPMux *mux) ;
-static GstFlowReturn gst_dcv_rtp_mux_chain (GstPad * pad, GstObject * parent,
-    GstBuffer * buffer);
-static GstFlowReturn gst_rtp_dcv_mux_chain_list(GstPad * pad, GstObject * parent,
-    GstBufferList * bufferlist);
-static gboolean gst_rtp_mux_setcaps (GstPad * pad, GstDcvRTPMux * rtp_mux,
-    GstCaps * caps);
-static gboolean gst_dcv_rtp_mux_flush(GstCollectPads * pads,gpointer pdata) ;
-static gboolean gst_dcv_rtp_mux_sink_event (GstCollectPads * pads, GstCollectData * pad, GstEvent * event, gpointer pdata);
-static gboolean gst_dcv_rtp_mux_sink_query (GstCollectPads * pad, GstCollectData * cdata, GstQuery * query, gboolean discard);
-static GstFlowReturn 
-gst_dcv_rtp_mux_buffer_collected (GstCollectPads * pads, GstCollectData * Data, GstBuffer * buffer, GstDcvRTPMux * dcv_mux) ;
-static GstFlowReturn 
-gst_dcv_rtp_mux_collected (GstCollectPads * pads, GstDcvRTPMux * dcv_mux) ;
+#define gst_dcvrtpmux_parent_class parent_class
+G_DEFINE_TYPE (Gstdcvrtpmux, gst_dcvrtpmux, GST_TYPE_ELEMENT);
 
-static GstStateChangeReturn gst_dcv_rtp_mux_change_state (GstElement *
-    element, GstStateChange transition);
-
-static void gst_dcv_rtp_mux_pad_destroy_notify (GstCollectData * data) ;
-static void gst_rtp_mux_set_property (GObject * object, guint prop_id,
+static void gst_dcvrtpmux_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
-static void gst_rtp_mux_get_property (GObject * object, guint prop_id,
+static void gst_dcvrtpmux_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
-static void gst_rtp_mux_dispose (GObject * object);
 
-static gboolean gst_rtp_mux_src_event_real (GstDcvRTPMux * rtp_mux,
-    GstEvent * event);
+static gboolean gst_dcvrtpmux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
+static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * parent, GstBuffer * buf);
+static GstPad *gst_dcvrtpmux_request_new_pad (GstElement * element,
+    GstPadTemplate * templ, const gchar * name, const GstCaps * caps);
+static void gst_dcvrtpmux_setup_sinkpad(GstElement * filter, GstPad *sinkpad) ;
 
-G_DEFINE_TYPE (GstDcvRTPMux, gst_dcvrtp_mux, GST_TYPE_ELEMENT);
+/* GObject vmethod implementations */
 
-
+/* initialize the dcvrtpmux's class */
 static void
-gst_dcvrtp_mux_class_init (GstDcvRTPMuxClass * klass)
+gst_dcvrtpmux_class_init (GstdcvrtpmuxClass * klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
@@ -131,213 +125,88 @@ gst_dcvrtp_mux_class_init (GstDcvRTPMuxClass * klass)
   gobject_class = (GObjectClass *) klass;
   gstelement_class = (GstElementClass *) klass;
 
+  gobject_class->set_property = gst_dcvrtpmux_set_property;
+  gobject_class->get_property = gst_dcvrtpmux_get_property;
 
-  gst_element_class_add_static_pad_template (gstelement_class, &src_factory);
-  gst_element_class_add_static_pad_template (gstelement_class, &sink_factory);
+  g_object_class_install_property (gobject_class, PROP_SILENT,
+      g_param_spec_boolean ("silent", "Silent", "Produce verbose output ?",
+          FALSE, G_PARAM_READWRITE));
 
-  gst_element_class_set_static_metadata (gstelement_class, "RTP muxer",
-      "Codec/Muxer",
-      "multiplex N rtp streams into one in round robin", "Zeeshan Ali <first.last@nokia.com>");
+  gst_element_class_set_details_simple(gstelement_class,
+    "dcvrtpmux",
+    "FIXME:Generic",
+    "FIXME:Generic Template Element",
+    "Abheek Saha <<abheek.saha@gmail.com>>");
 
-  gobject_class->get_property = gst_rtp_mux_get_property;
-  gobject_class->set_property = gst_rtp_mux_set_property;
-  gobject_class->dispose = gst_rtp_mux_dispose;
-
-  klass->src_event = gst_rtp_mux_src_event_real;
-
-  g_object_class_install_property (G_OBJECT_CLASS (klass),
-      PROP_TIMESTAMP_OFFSET, g_param_spec_int ("timestamp-offset",
-          "Timestamp Offset",
-          "Offset to add to all outgoing timestamps (-1 = random)", -1,
-          G_MAXINT, DEFAULT_TIMESTAMP_OFFSET,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_SEQNUM_OFFSET,
-      g_param_spec_int ("seqnum-offset", "Sequence number Offset",
-          "Offset to add to all outgoing seqnum (-1 = random)", -1, G_MAXINT,
-          DEFAULT_SEQNUM_OFFSET, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_SEQNUM,
-      g_param_spec_uint ("seqnum", "Sequence number",
-          "The RTP sequence number of the last processed packet",
-          0, G_MAXUINT, 0, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_SSRC,
-      g_param_spec_uint ("ssrc", "SSRC",
-          "The SSRC of the packets (default == random)",
-          0, G_MAXUINT, DEFAULT_SSRC,
-          GST_PARAM_MUTABLE_PLAYING | G_PARAM_READWRITE |
-          G_PARAM_STATIC_STRINGS));
-
+  gst_element_class_add_pad_template (gstelement_class, gst_static_pad_template_get (&src_factory));
+  gst_element_class_add_pad_template (gstelement_class, gst_static_pad_template_get (&sink_factory));
   gstelement_class->request_new_pad =
-      GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_request_new_pad);
-  gstelement_class->release_pad = GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_release_pad);
-  gstelement_class->change_state = GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_change_state);
+      GST_DEBUG_FUNCPTR (gst_dcvrtpmux_request_new_pad);
 }
 
-static void
-gst_rtp_mux_dispose (GObject * object)
+/* initialize the new element
+ * instantiate pads and add them to element
+ * set pad calback functions
+ * initialize instance structure
+ */
+static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 {
-  GstDcvRTPMux *rtp_mux = GST_DCV_RTP_MUX (object);
-  GList *item;
+  	Gstdcvrtpmux *gdcvrtpmux = GST_DCVRTPMUX (parent);
+	GST_LOG_OBJECT (parent,"dcvrtpmuxTerminal: Received query of type %u\n", GST_QUERY_TYPE(query)) ;
+	gboolean ret = TRUE ;
+	switch (GST_QUERY_TYPE(query)) {
+		case GST_QUERY_CAPS:
+		{
+			GstCaps *filter, *caps;
 
-  g_clear_object (&rtp_mux->last_pad);
-
-restart:
-  for (item = GST_ELEMENT_PADS (object); item; item = g_list_next (item)) {
-    GstPad *pad = GST_PAD (item->data);
-    if (GST_PAD_IS_SINK (pad)) {
-      gst_element_release_request_pad (GST_ELEMENT (object), pad);
-      goto restart;
-    }
-  }
-
-  //object->dispose (object);
-}
-
-static gboolean
-gst_rtp_mux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
-{
-  GstDcvRTPMux *rtp_mux = GST_DCV_RTP_MUX (parent);
-  GstDcvRTPMuxClass *klass;
-  gboolean ret;
-
-  klass = GST_DCV_RTP_MUX_GET_CLASS (rtp_mux);
-
-  ret = klass->src_event (rtp_mux, event);
-
-  return ret;
-}
-
-static gboolean
-gst_rtp_mux_src_event_real (GstDcvRTPMux * rtp_mux, GstEvent * event)
-{
-  switch (GST_EVENT_TYPE (event)) {
-    case GST_EVENT_CUSTOM_UPSTREAM:
-    {
-      const GstStructure *s = gst_event_get_structure (event);
-
-      if (gst_structure_has_name (s, "GstRTPCollision")) {
-        guint ssrc = 0;
-
-        if (!gst_structure_get_uint (s, "ssrc", &ssrc))
-          ssrc = -1;
-
-        GST_DEBUG_OBJECT (rtp_mux, "collided ssrc: %x", ssrc);
-
-        /* choose another ssrc for our stream */
-        GST_OBJECT_LOCK (rtp_mux);
-        if (ssrc == rtp_mux->current_ssrc) {
-          GstCaps *caps;
-          guint suggested_ssrc = 0;
-          guint32 new_ssrc;
-
-          if (gst_structure_get_uint (s, "suggested-ssrc", &suggested_ssrc))
-            rtp_mux->current_ssrc = suggested_ssrc;
-
-          while (ssrc == rtp_mux->current_ssrc)
-            rtp_mux->current_ssrc = g_random_int ();
-
-          new_ssrc = rtp_mux->current_ssrc;
-          GST_INFO_OBJECT (rtp_mux, "New ssrc after collision %x (was: %x)",
-              new_ssrc, ssrc);
-          GST_OBJECT_UNLOCK (rtp_mux);
-
-          caps = gst_pad_get_current_caps (rtp_mux->srcpad);
-          caps = gst_caps_make_writable (caps);
-          gst_caps_set_simple (caps, "ssrc", G_TYPE_UINT, new_ssrc, NULL);
-          gst_pad_set_caps (rtp_mux->srcpad, caps);
-          gst_caps_unref (caps);
-        } else {
-          GST_OBJECT_UNLOCK (rtp_mux);
-        }
-      }
-      break;
-    }
-    default:
-      break;
-  }
-
-
-  return gst_pad_event_default (rtp_mux->srcpad, GST_OBJECT (rtp_mux), event);
-}
-
-static void
-gst_dcvrtp_mux_init (GstDcvRTPMux * dcv_rtp_mux)
-{
-  GstElementClass *klass = GST_ELEMENT_GET_CLASS (dcv_rtp_mux);
-
-  dcv_rtp_mux->srcpad =
-      gst_pad_new_from_template (gst_element_class_get_pad_template (klass,
-          "src"), "src");
-  gst_pad_set_event_function (dcv_rtp_mux->srcpad,
-      GST_DEBUG_FUNCPTR (gst_rtp_mux_src_event));
-  gst_pad_use_fixed_caps (dcv_rtp_mux->srcpad);
-  gst_element_add_pad (GST_ELEMENT (dcv_rtp_mux), dcv_rtp_mux->srcpad);
-
-  dcv_rtp_mux->ssrc = DEFAULT_SSRC;
-  dcv_rtp_mux->current_ssrc = DEFAULT_SSRC;
-  dcv_rtp_mux->ts_offset = DEFAULT_TIMESTAMP_OFFSET;
-  dcv_rtp_mux->seqnum_offset = DEFAULT_SEQNUM_OFFSET;
-
-  dcv_rtp_mux->last_stop = GST_CLOCK_TIME_NONE;
-
-  dcv_rtp_mux->sinkpads = gst_collect_pads_new() ;
-  gst_collect_pads_set_buffer_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_buffer_collected),dcv_rtp_mux);
-  gst_collect_pads_set_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_collected),dcv_rtp_mux);
-  gst_collect_pads_set_event_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_sink_event),dcv_rtp_mux);
-  gst_collect_pads_set_flush_function (dcv_rtp_mux->sinkpads, GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_flush),dcv_rtp_mux);
-}
-
-static void
-gst_dcv_rtp_mux_pad_destroy_notify (GstCollectData * data)
-{
-  GstDcvRtpPadData *dcvpad = (GstDcvRtpPadData *) data;
-  g_print("Destroy notify called\n") ;
-}
-static void
-gst_rtp_mux_setup_sinkpad (GstDcvRTPMux * rtp_mux, GstPad * sinkpad)
-{
-  GstDcvRTPMuxPadPrivate *padpriv = g_slice_new0 (GstDcvRTPMuxPadPrivate);
-
-  /* setup some pad functions */
-  
-#if 0
-  gst_pad_set_chain_list_function (sinkpad,
-      GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_chain_list_collected));
-  gst_pad_set_event_function (sinkpad,
-      GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_sink_event));
-  gst_pad_set_query_function (sinkpad,
-      GST_DEBUG_FUNCPTR (gst_dcv_rtp_mux_sink_query));
-#endif
-
-
-  gst_pad_set_element_private (sinkpad, padpriv);
-  gst_pad_set_active (sinkpad, TRUE);
-  //gst_collect_pads_add_pad (rtp_mux->sinkpads, sinkpad,
-   //      sizeof (GstDcvRtpPadData), gst_dcv_rtp_mux_pad_destroy_notify, FALSE);
-//      rtp_mux->active_pads++;
+			gst_query_parse_caps (query, &filter);
+			GST_LOG_OBJECT(parent,"dcvrtpmuxTerminal: Caps query received:%s\n",gst_caps_to_string(filter)) ;
+			caps = gst_caps_new_simple("application/x-rtp",NULL) ;
+			GST_LOG_OBJECT(parent,"dcvrtpmuxTerminal: Returning query response %s\n",gst_caps_to_string(caps)) ;
+			gst_query_set_caps_result (query, caps);
+			gst_caps_unref (caps);
+			ret = TRUE;
+			break;
+    		}
+		case GST_QUERY_ACCEPT_CAPS: 
+		{
+			GstCaps *caps ;
+			gst_query_parse_accept_caps(query,&caps) ;
+			GST_LOG_OBJECT(parent,"dcvrtpmuxTerminal: Accept caps:%s\n",gst_caps_to_string(caps)) ;
+			ret = TRUE;
+          		gst_query_set_accept_caps_result (query, TRUE);
+			break ;
+		}
+		default:
+			GST_LOG_OBJECT(parent,"Couldn't understand this query\n") ;
+			ret = gst_pad_query_default(pad,parent,query) ;
+			break;
+	}
+	return ret ;
 }
 
 static GstPad *
-gst_dcv_rtp_mux_request_new_pad (GstElement * element,
+gst_dcvrtpmux_request_new_pad (GstElement * element,
     GstPadTemplate * templ, const gchar * req_name, const GstCaps * caps)
 {
-  GstDcvRTPMux *dcv_rtp_mux;
+  GstDcvRtpMux_t *dcv_rtp_mux;
   GstPad *newpad;
 
   GST_LOG_OBJECT(element,"Request received for pad %s, caps:%s\n",req_name,gst_caps_to_string(caps)) ;
   g_return_val_if_fail (templ != NULL, NULL);
-  g_return_val_if_fail (GST_IS_DCV_RTP_MUX (element), NULL);
+  g_return_val_if_fail (GST_IS_DCVRTPMUX (element), NULL);
 
-  dcv_rtp_mux = GST_DCV_RTP_MUX (element);
+  dcv_rtp_mux = GST_DCVRTPMUX (element);
 
   if (templ->direction != GST_PAD_SINK) {
     GST_WARNING_OBJECT (dcv_rtp_mux, "request pad that is not a SINK pad");
     return NULL;
   }
   else if (req_name == NULL)
-  {
+ {
 	  GST_LOG_OBJECT(dcv_rtp_mux, "request pad name is null:\n") ;
 	  return NULL ;
-  }
+ }
   else if (strcmp(req_name,"sink_0") && strcmp(req_name, "sink_1")) {
 	  GST_LOG_OBJECT(dcv_rtp_mux, "request pad name is wierd:%s\n",req_name) ;
 	  return NULL ;
@@ -346,592 +215,56 @@ gst_dcv_rtp_mux_request_new_pad (GstElement * element,
   newpad = gst_pad_new_from_template (templ, req_name);
   if (newpad)
   {
-
-    	gst_rtp_mux_setup_sinkpad (dcv_rtp_mux, newpad);
-	dcv_rtp_mux->active_pads++ ;
-	gst_element_add_pad(element,newpad) ;
-	dcvpad[dcv_rtp_mux->active_pads] = 
-		(GstDcvRtpPadData *)gst_collect_pads_add_pad(dcv_rtp_mux->sinkpads,newpad,
-			  sizeof(GstDcvRtpPadData), gst_dcv_rtp_mux_pad_destroy_notify, FALSE) ;
-	strncpy(dcvpad[dcv_rtp_mux->active_pads]->padname , req_name, 20) ;
-	dcvpad[dcv_rtp_mux->active_pads]->txsize = 0 ;
-	dcv_rtp_mux->active_pads++ ;
+	dcvrtpmux_bufq_loc_t *ppad = &(dcv_rtp_mux->padq[dcv_rtp_mux->nsinks]) ;
+	dcv_rtp_mux->sinkpads[dcv_rtp_mux->nsinks] = newpad ;
+	gst_dcvrtpmux_setup_sinkpad(element,newpad) ;
+	ppad->pD.bufq = g_queue_new() ;
+	ppad->pD.entries = 0;
+	ppad->caps = caps ;
+	
+	dcv_rtp_mux->nsinks++ ;
 	GST_LOG_OBJECT(dcv_rtp_mux,"Added new pad :%s, active pads=%u\n",
-			gst_pad_get_name(newpad),dcv_rtp_mux->active_pads) ;
+			gst_pad_get_name(newpad),dcv_rtp_mux->nsinks) ;
   }
   else
     GST_WARNING_OBJECT (dcv_rtp_mux, "failed to create request pad");
 
   return newpad;
 }
-
+static void gst_dcvrtpmux_setup_sinkpad(GstElement * filter, GstPad *sinkpad)
+{
+  gst_pad_set_event_function (sinkpad, GST_DEBUG_FUNCPTR(gst_dcvrtpmux_sink_event));
+  gst_pad_set_chain_function (sinkpad, GST_DEBUG_FUNCPTR(gst_dcvrtpmux_chain_rtpbuffer));
+  gst_pad_set_query_function_full (sinkpad, gstQueryFunc,NULL,NULL) ;
+// GST_PAD_SET_PROXY_CAPS (filter->video_in);
+  gst_element_add_pad (GST_ELEMENT (filter), sinkpad);
+}
 static void
-gst_dcv_rtp_mux_release_pad (GstElement * element, GstPad * pad)
+gst_dcvrtpmux_init (Gstdcvrtpmux * filter)
 {
-  GstDcvRTPMux * dcv_rtp_mux = GST_DCV_RTP_MUX (element);
-  GstDcvRTPMuxPadPrivate *padpriv;
 
+  filter->srcpad = gst_pad_new_from_static_template (&src_factory, "src");
+//  GST_PAD_SET_PROXY_CAPS (filter->video_out);
+  gst_pad_set_query_function_full (filter->srcpad, gstQueryFunc,NULL,NULL) ;
+  gst_element_add_pad (GST_ELEMENT (filter), filter->srcpad);
 
-  GST_OBJECT_LOCK (element);
-  padpriv = gst_pad_get_element_private (pad);
-  gst_pad_set_element_private (pad, NULL);
-  GST_OBJECT_UNLOCK (element);
-
-  gst_collect_pads_remove_pad(dcv_rtp_mux->sinkpads, pad);
-  gst_element_remove_pad (element,pad) ;
-
-  if (padpriv) {
-    g_slice_free (GstDcvRTPMuxPadPrivate, padpriv);
-  }
+  filter->silent = FALSE;
 }
 
-/* Put our own timestamp-offset on the buffer */
-static void
-gst_rtp_mux_readjust_rtp_timestamp_locked (GstDcvRTPMux * rtp_mux,
-    GstDcvRTPMuxPadPrivate * padpriv, GstRTPBuffer * rtpbuffer)
+static int dcvrtpmuxProcessQueuesDcv(Gstdcvrtpmux * filter)
 {
-  guint32 ts;
-  guint32 sink_ts_base = 0;
-
-  if (padpriv && padpriv->have_timestamp_offset)
-    sink_ts_base = padpriv->timestamp_offset;
-
-  ts = gst_rtp_buffer_get_timestamp (rtpbuffer) - sink_ts_base +
-      rtp_mux->ts_base;
-  GST_LOG_OBJECT (rtp_mux, "Re-adjusting RTP ts %u to %u",
-      gst_rtp_buffer_get_timestamp (rtpbuffer), ts);
-  gst_rtp_buffer_set_timestamp (rtpbuffer, ts);
-}
-
-static gboolean
-process_buffer_locked (GstDcvRTPMux * rtp_mux, GstDcvRTPMuxPadPrivate * padpriv,
-    GstRTPBuffer * rtpbuffer)
-{
-  GstDcvRTPMuxClass *klass = GST_DCV_RTP_MUX_GET_CLASS (rtp_mux);
-
-  if (klass->accept_buffer_locked)
-    if (!klass->accept_buffer_locked (rtp_mux, padpriv, rtpbuffer))
-      return FALSE;
-
-  rtp_mux->seqnum++;
-  gst_rtp_buffer_set_seq (rtpbuffer, rtp_mux->seqnum);
-
-  gst_rtp_buffer_set_ssrc (rtpbuffer, rtp_mux->current_ssrc);
-  gst_rtp_mux_readjust_rtp_timestamp_locked (rtp_mux, padpriv, rtpbuffer);
-  GST_LOG_OBJECT (rtp_mux,
-      "Pushing packet size %" G_GSIZE_FORMAT ", seq=%d, ts=%u, ssrc=%x",
-      rtpbuffer->map[0].size, rtp_mux->seqnum,
-      gst_rtp_buffer_get_timestamp (rtpbuffer), rtp_mux->current_ssrc);
-
-  if (padpriv) {
-    if (padpriv->segment.format == GST_FORMAT_TIME) {
-      GST_BUFFER_PTS (rtpbuffer->buffer) =
-          gst_segment_to_running_time (&padpriv->segment, GST_FORMAT_TIME,
-          GST_BUFFER_PTS (rtpbuffer->buffer));
-      GST_BUFFER_DTS (rtpbuffer->buffer) =
-          gst_segment_to_running_time (&padpriv->segment, GST_FORMAT_TIME,
-          GST_BUFFER_DTS (rtpbuffer->buffer));
-    }
-  }
-
-  return TRUE;
-}
-
-struct BufferListData
-{
-  GstDcvRTPMux *rtp_mux;
-  GstDcvRTPMuxPadPrivate *padpriv;
-  gboolean drop;
-};
-
-static gboolean
-process_list_item (GstBuffer ** buffer, guint idx, gpointer user_data)
-{
-  struct BufferListData *bd = user_data;
-  GstRTPBuffer rtpbuffer = GST_RTP_BUFFER_INIT;
-
-  *buffer = gst_buffer_make_writable (*buffer);
-
-  gst_rtp_buffer_map (*buffer, GST_MAP_READWRITE, &rtpbuffer);
-
-  bd->drop = !process_buffer_locked (bd->rtp_mux, bd->padpriv, &rtpbuffer);
-
-  gst_rtp_buffer_unmap (&rtpbuffer);
-
-  if (bd->drop)
-    return FALSE;
-
-  if (GST_BUFFER_DURATION_IS_VALID (*buffer) &&
-      GST_BUFFER_PTS_IS_VALID (*buffer))
-    bd->rtp_mux->last_stop = GST_BUFFER_PTS (*buffer) +
-        GST_BUFFER_DURATION (*buffer);
-  else
-    bd->rtp_mux->last_stop = GST_CLOCK_TIME_NONE;
-
-  return TRUE;
-}
-
-static gboolean resend_events (GstPad * pad, GstEvent ** event,
-    gpointer user_data);
-
-static GstFlowReturn
-gst_dcv_rtp_mux_chain_list (GstPad * pad, GstObject * parent,
-    GstBufferList * bufferlist)
-{
-  GstDcvRTPMux *rtp_mux;
-  GstFlowReturn ret;
-  GstDcvRTPMuxPadPrivate *padpriv;
-  gboolean changed = FALSE;
-  struct BufferListData bd;
-
-  rtp_mux = GST_DCV_RTP_MUX (parent);
-
-  if (gst_pad_check_reconfigure (rtp_mux->srcpad)) {
-    GstCaps *current_caps = gst_pad_get_current_caps (pad);
-
-    if (!gst_rtp_mux_setcaps (pad, rtp_mux, current_caps)) {
-      gst_pad_mark_reconfigure (rtp_mux->srcpad);
-      if (GST_PAD_IS_FLUSHING (rtp_mux->srcpad))
-        ret = GST_FLOW_FLUSHING;
-      else
-        ret = GST_FLOW_NOT_NEGOTIATED;
-      gst_buffer_list_unref (bufferlist);
-      goto out;
-    }
-    gst_caps_unref (current_caps);
-  }
-
-  GST_OBJECT_LOCK (rtp_mux);
-
-  padpriv = gst_pad_get_element_private (pad);
-  if (!padpriv) {
-    GST_OBJECT_UNLOCK (rtp_mux);
-    ret = GST_FLOW_NOT_LINKED;
-    gst_buffer_list_unref (bufferlist);
-    goto out;
-  }
-
-  bd.rtp_mux = rtp_mux;
-  bd.padpriv = padpriv;
-  bd.drop = FALSE;
-
-  bufferlist = gst_buffer_list_make_writable (bufferlist);
-  gst_buffer_list_foreach (bufferlist, process_list_item, &bd);
-
-  if (!bd.drop && pad != rtp_mux->last_pad) {
-    changed = TRUE;
-    g_clear_object (&rtp_mux->last_pad);
-    rtp_mux->last_pad = g_object_ref (pad);
-  }
-
-  GST_OBJECT_UNLOCK (rtp_mux);
-
-  if (changed)
-    gst_pad_sticky_events_foreach (pad, resend_events, rtp_mux);
-
-  if (bd.drop) {
-    gst_buffer_list_unref (bufferlist);
-    ret = GST_FLOW_OK;
-  } else {
-    ret = gst_pad_push_list (rtp_mux->srcpad, bufferlist);
-  }
-
-out:
-
-  return ret;
-}
-
-static gboolean
-resend_events (GstPad * pad, GstEvent ** event, gpointer user_data)
-{
-  GstDcvRTPMux *rtp_mux = user_data;
-
-  if (GST_EVENT_TYPE (*event) == GST_EVENT_CAPS) {
-    GstCaps *caps;
-
-    gst_event_parse_caps (*event, &caps);
-    gst_rtp_mux_setcaps (pad, rtp_mux, caps);
-  } else if (GST_EVENT_TYPE (*event) == GST_EVENT_SEGMENT) {
-    GstSegment new_segment;
-    gst_segment_init (&new_segment, GST_FORMAT_TIME);
-    gst_pad_push_event (rtp_mux->srcpad, gst_event_new_segment (&new_segment));
-  } else {
-    gst_pad_push_event (rtp_mux->srcpad, gst_event_ref (*event));
-  }
-
-  return TRUE;
-}
-
-static GstFlowReturn
-gst_dcv_rtp_mux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
-{
-  GstDcvRTPMux *rtp_mux;
-  GstFlowReturn ret;
-  GstDcvRTPMuxPadPrivate *padpriv;
-  gboolean drop;
-  gboolean changed = FALSE;
-  GstRTPBuffer rtpbuffer = GST_RTP_BUFFER_INIT;
-
-  rtp_mux = GST_DCV_RTP_MUX (parent);
-
-  if (gst_pad_check_reconfigure (rtp_mux->srcpad)) {
-    GstCaps *current_caps = gst_pad_get_current_caps (pad);
-
-    if (!gst_rtp_mux_setcaps (pad, rtp_mux, current_caps)) {
-      gst_pad_mark_reconfigure (rtp_mux->srcpad);
-      if (GST_PAD_IS_FLUSHING (rtp_mux->srcpad))
-        ret = GST_FLOW_FLUSHING;
-      else
-        ret = GST_FLOW_NOT_NEGOTIATED;
-      gst_buffer_unref (buffer);
-      goto out;
-    }
-    gst_caps_unref (current_caps);
-  }
-
-  GST_OBJECT_LOCK (rtp_mux);
-  padpriv = gst_pad_get_element_private (pad);
-
-  if (!padpriv) {
-    GST_OBJECT_UNLOCK (rtp_mux);
-    gst_buffer_unref (buffer);
-    return GST_FLOW_NOT_LINKED;
-  }
-
-  buffer = gst_buffer_make_writable (buffer);
-
-  if (!gst_rtp_buffer_map (buffer, GST_MAP_READWRITE, &rtpbuffer)) {
-    GST_OBJECT_UNLOCK (rtp_mux);
-    gst_buffer_unref (buffer);
-    GST_ERROR_OBJECT (rtp_mux, "Invalid RTP buffer");
-    return GST_FLOW_ERROR;
-  }
-
-  drop = !process_buffer_locked (rtp_mux, padpriv, &rtpbuffer);
-
-  gst_rtp_buffer_unmap (&rtpbuffer);
-
-  if (!drop) {
-    if (pad != rtp_mux->last_pad) {
-      changed = TRUE;
-      g_clear_object (&rtp_mux->last_pad);
-      rtp_mux->last_pad = g_object_ref (pad);
-    }
-
-    if (GST_BUFFER_DURATION_IS_VALID (buffer) &&
-        GST_BUFFER_PTS_IS_VALID (buffer))
-      rtp_mux->last_stop = GST_BUFFER_PTS (buffer) +
-          GST_BUFFER_DURATION (buffer);
-    else
-      rtp_mux->last_stop = GST_CLOCK_TIME_NONE;
-  }
-
-  GST_OBJECT_UNLOCK (rtp_mux);
-
-  if (changed)
-    gst_pad_sticky_events_foreach (pad, resend_events, rtp_mux);
-
-  if (drop) {
-    gst_buffer_unref (buffer);
-    ret = GST_FLOW_OK;
-  } else {
-    ret = gst_pad_push (rtp_mux->srcpad, buffer);
-  }
-
-out:
-  return ret;
-}
-
-static gboolean
-gst_rtp_mux_setcaps (GstPad * pad, GstDcvRTPMux * rtp_mux, GstCaps * caps)
-{
-  GstStructure *structure;
-  gboolean ret = FALSE;
-  GstDcvRTPMuxPadPrivate *padpriv;
-  GstCaps *peercaps;
-
-  if (caps == NULL)
-    return FALSE;
-
-  if (!gst_caps_is_fixed (caps))
-    return FALSE;
-
-  peercaps = gst_pad_peer_query_caps (rtp_mux->srcpad, NULL);
-  if (peercaps) {
-    GstCaps *tcaps, *othercaps;;
-    tcaps = gst_pad_get_pad_template_caps (pad);
-    othercaps = gst_caps_intersect_full (peercaps, tcaps,
-        GST_CAPS_INTERSECT_FIRST);
-
-    if (gst_caps_get_size (othercaps) > 0) {
-      structure = gst_caps_get_structure (othercaps, 0);
-      GST_OBJECT_LOCK (rtp_mux);
-      if (gst_structure_get_uint (structure, "ssrc", &rtp_mux->current_ssrc)) {
-        GST_INFO_OBJECT (pad, "Use downstream ssrc: %x", rtp_mux->current_ssrc);
-        rtp_mux->have_ssrc = TRUE;
-      }
-      if (gst_structure_get_uint (structure,
-              "timestamp-offset", &rtp_mux->ts_base)) {
-        GST_INFO_OBJECT (pad, "Use downstream timestamp-offset: %u",
-            rtp_mux->ts_base);
-      }
-      GST_OBJECT_UNLOCK (rtp_mux);
-    }
-
-    gst_caps_unref (othercaps);
-
-    gst_caps_unref (peercaps);
-    gst_caps_unref (tcaps);
-  }
-
-  structure = gst_caps_get_structure (caps, 0);
-
-  if (!structure)
-    return FALSE;
-
-  GST_OBJECT_LOCK (rtp_mux);
-  padpriv = gst_pad_get_element_private (pad);
-  if (padpriv &&
-      gst_structure_get_uint (structure, "timestamp-offset",
-          &padpriv->timestamp_offset)) {
-    padpriv->have_timestamp_offset = TRUE;
-  }
-
-  caps = gst_caps_copy (caps);
-
-  /* if we don't have a specified ssrc, first try to take one from the caps,
-     and if that fails, generate one */
-  if (rtp_mux->ssrc == DEFAULT_SSRC) {
-    if (rtp_mux->current_ssrc == DEFAULT_SSRC) {
-      if (!gst_structure_get_uint (structure, "ssrc", &rtp_mux->current_ssrc)) {
-        rtp_mux->current_ssrc = g_random_int ();
-        GST_INFO_OBJECT (rtp_mux, "Set random ssrc %x", rtp_mux->current_ssrc);
-      }
-    }
-  } else {
-    rtp_mux->current_ssrc = rtp_mux->ssrc;
-    GST_INFO_OBJECT (rtp_mux, "Set ssrc %x", rtp_mux->current_ssrc);
-  }
-
-  gst_caps_set_simple (caps,
-      "timestamp-offset", G_TYPE_UINT, rtp_mux->ts_base,
-      "seqnum-offset", G_TYPE_UINT, rtp_mux->seqnum_base,
-      "ssrc", G_TYPE_UINT, rtp_mux->current_ssrc, NULL);
-
-  GST_OBJECT_UNLOCK (rtp_mux);
-
-  if (rtp_mux->send_stream_start) {
-    gchar s_id[32];
-
-    /* stream-start (FIXME: create id based on input ids) */
-    g_snprintf (s_id, sizeof (s_id), "interleave-%08x", g_random_int ());
-    gst_pad_push_event (rtp_mux->srcpad, gst_event_new_stream_start (s_id));
-
-    rtp_mux->send_stream_start = FALSE;
-  }
-
-  GST_DEBUG_OBJECT (rtp_mux,
-      "setting caps %" GST_PTR_FORMAT " on src pad..", caps);
-  ret = gst_pad_set_caps (rtp_mux->srcpad, caps);
-
-
-  gst_caps_unref (caps);
-
-  return ret;
 }
 
 static void
-clear_caps (GstCaps * caps, gboolean only_clock_rate)
+gst_dcvrtpmux_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec)
 {
-  gint i, j;
-
-  /* Lets only match on the clock-rate */
-  for (i = 0; i < gst_caps_get_size (caps); i++) {
-    GstStructure *s = gst_caps_get_structure (caps, i);
-
-    for (j = 0; j < gst_structure_n_fields (s); j++) {
-      const gchar *name = gst_structure_nth_field_name (s, j);
-
-      if (strcmp (name, "clock-rate") && (only_clock_rate ||
-              (strcmp (name, "ssrc")))) {
-        gst_structure_remove_field (s, name);
-        j--;
-      }
-    }
-  }
-}
-
-static gboolean
-same_clock_rate_fold (const GValue * item, GValue * ret, gpointer user_data)
-{
-  GstPad *mypad = user_data;
-  GstPad *pad = g_value_get_object (item);
-  GstCaps *peercaps;
-  GstCaps *accumcaps;
-
-  if (pad == mypad)
-    return TRUE;
-
-  accumcaps = g_value_get_boxed (ret);
-  peercaps = gst_pad_peer_query_caps (pad, accumcaps);
-  if (!peercaps) {
-    g_warning ("no peercaps");
-    return TRUE;
-  }
-  peercaps = gst_caps_make_writable (peercaps);
-  clear_caps (peercaps, TRUE);
-
-  g_value_take_boxed (ret, peercaps);
-
-  return !gst_caps_is_empty (peercaps);
-}
-
-static GstCaps *
-gst_rtp_mux_getcaps (GstPad * pad, GstDcvRTPMux * mux, GstCaps * filter)
-{
-  GstCaps *caps = NULL;
-  GstIterator *iter = NULL;
-  GValue v = { 0 };
-  GstIteratorResult res;
-  GstCaps *peercaps;
-  GstCaps *othercaps;
-  GstCaps *tcaps;
-  const GstStructure *structure;
-
-  peercaps = gst_pad_peer_query_caps (mux->srcpad, NULL);
-
-  if (peercaps) {
-    tcaps = gst_pad_get_pad_template_caps (pad);
-    othercaps = gst_caps_intersect_full (peercaps, tcaps,
-        GST_CAPS_INTERSECT_FIRST);
-    gst_caps_unref (peercaps);
-  } else {
-    tcaps = gst_pad_get_pad_template_caps (mux->srcpad);
-    if (filter)
-      othercaps = gst_caps_intersect_full (filter, tcaps,
-          GST_CAPS_INTERSECT_FIRST);
-    else
-      othercaps = gst_caps_copy (tcaps);
-  }
-  gst_caps_unref (tcaps);
-
-  GST_LOG_OBJECT (pad, "Intersected srcpad-peercaps and template caps: %"
-      GST_PTR_FORMAT, othercaps);
-
-  structure = gst_caps_get_structure (othercaps, 0);
-  if (mux->ssrc == DEFAULT_SSRC) {
-    if (gst_structure_get_uint (structure, "ssrc", &mux->current_ssrc))
-      GST_DEBUG_OBJECT (pad, "Use downstream ssrc: %x", mux->current_ssrc);
-  }
-
-  clear_caps (othercaps, TRUE);
-
-  g_value_init (&v, GST_TYPE_CAPS);
-
-  iter = gst_element_iterate_sink_pads (GST_ELEMENT (mux));
-  do {
-    gst_value_set_caps (&v, othercaps);
-    res = gst_iterator_fold (iter, same_clock_rate_fold, &v, pad);
-    gst_iterator_resync (iter);
-  } while (res == GST_ITERATOR_RESYNC);
-  gst_iterator_free (iter);
-
-  caps = gst_caps_intersect ((GstCaps *) gst_value_get_caps (&v), othercaps);
-
-  g_value_unset (&v);
-  gst_caps_unref (othercaps);
-
-  if (res == GST_ITERATOR_ERROR) {
-    gst_caps_unref (caps);
-    caps = gst_caps_new_empty ();
-  }
-
-
-  return caps;
-}
-
-static gboolean
-gst_dcv_rtp_mux_sink_query (GstCollectPads * pads, GstCollectData * cdata, GstQuery * query,gboolean discard)
-{
-  gboolean res = FALSE;
-    res = gst_collect_pads_query_default (pads, cdata, query,discard);
-
-#if 0
-  switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_CAPS:
-    {
-      GstCaps *filter, *caps;
-
-      gst_query_parse_caps (query, &filter);
-      GST_LOG_OBJECT (pad, "Received caps-query with filter-caps: %"
-          GST_PTR_FORMAT, filter);
-      caps = gst_rtp_mux_getcaps (pad, mux, filter);
-      gst_query_set_caps_result (query, caps);
-      GST_LOG_OBJECT (mux, "Answering caps-query with caps: %"
-          GST_PTR_FORMAT, caps);
-      gst_caps_unref (caps);
-      res = TRUE;
-      break;
-    }
-    default:
-      res = gst_pad_query_default (pad, parent, query);
-      break;
-  }
-#endif
-  return res;
-}
-
-static void
-gst_rtp_mux_get_property (GObject * object,
-    guint prop_id, GValue * value, GParamSpec * pspec)
-{
-  GstDcvRTPMux *rtp_mux;
-
-  rtp_mux = GST_DCV_RTP_MUX (object);
-
-  GST_OBJECT_LOCK (rtp_mux);
-  switch (prop_id) {
-    case PROP_TIMESTAMP_OFFSET:
-      g_value_set_int (value, rtp_mux->ts_offset);
-      break;
-    case PROP_SEQNUM_OFFSET:
-      g_value_set_int (value, rtp_mux->seqnum_offset);
-      break;
-    case PROP_SEQNUM:
-      g_value_set_uint (value, rtp_mux->seqnum);
-      break;
-    case PROP_SSRC:
-      g_value_set_uint (value, rtp_mux->ssrc);
-      break;
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      break;
-  }
-  GST_OBJECT_UNLOCK (rtp_mux);
-}
-
-static void
-gst_rtp_mux_set_property (GObject * object,
-    guint prop_id, const GValue * value, GParamSpec * pspec)
-{
-  GstDcvRTPMux *rtp_mux;
-
-  rtp_mux = GST_DCV_RTP_MUX (object);
+  Gstdcvrtpmux *filter = GST_DCVRTPMUX (object);
+  GST_LOG_OBJECT(object,"%s: Setting property %u\n",gst_element_get_name(GST_ELEMENT(object)), prop_id) ;
 
   switch (prop_id) {
-    case PROP_TIMESTAMP_OFFSET:
-      rtp_mux->ts_offset = g_value_get_int (value);
-      break;
-    case PROP_SEQNUM_OFFSET:
-      rtp_mux->seqnum_offset = g_value_get_int (value);
-      break;
-    case PROP_SSRC:
-      GST_OBJECT_LOCK (rtp_mux);
-      rtp_mux->ssrc = g_value_get_uint (value);
-      rtp_mux->current_ssrc = rtp_mux->ssrc;
-      rtp_mux->have_ssrc = TRUE;
-      GST_DEBUG_OBJECT (rtp_mux, "ssrc prop set to %x", rtp_mux->ssrc);
-      GST_OBJECT_UNLOCK (rtp_mux);
+    case PROP_SILENT:
+      filter->silent = g_value_get_boolean (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -939,243 +272,143 @@ gst_rtp_mux_set_property (GObject * object,
   }
 }
 
-static gboolean gst_dcv_rtp_mux_flush(GstCollectPads * pads,gpointer pdata)
+static void
+gst_dcvrtpmux_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec)
 {
-	GST_LOG_OBJECT(pads,"flushing function called on sinkpad\n") ;
-	return TRUE ;
+  Gstdcvrtpmux *filter = GST_DCVRTPMUX (object);
+
+  switch (prop_id) {
+    case PROP_SILENT:
+      g_value_set_boolean (value, filter->silent);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
 }
+
+/* GstElement vmethod implementations */
+
+/* this function handles sink events */
 static gboolean
-gst_dcv_rtp_mux_sink_event (GstCollectPads * pads, GstCollectData * pad, GstEvent * event, gpointer pdata)
+gst_dcvrtpmux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 {
-  GstDcvRTPMux *mux = GST_DCV_RTP_MUX (pdata);
-  GstDcvRtpPadData *dcv_pad = (GstDcvRtpPadData *) pad;
+  Gstdcvrtpmux *filter;
   gboolean ret;
 
-  GST_LOG_OBJECT (pad->pad, "Got %s event: sink pad status:%u src pad active:%s\n",
-		  GST_EVENT_TYPE_NAME (event),
-		  GST_COLLECT_PADS_STATE(mux->sinkpads),
-		  gst_pad_is_active(mux->srcpad) ? "Yes":"No") ;
-#if 1
+  filter = GST_DCVRTPMUX (parent);
+
+  GST_LOG_OBJECT (filter, "Received %s event: %" GST_PTR_FORMAT,
+      GST_EVENT_TYPE_NAME (event), event);
 
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_CAPS:
     {
-      GstCaps *caps;
+      GstCaps * caps;
 
       gst_event_parse_caps (event, &caps);
-      GST_LOG_OBJECT (pad, "Received caps-event with caps: %"
-          GST_PTR_FORMAT, caps);
-      ret = TRUE ;
-      //ret = gst_dcv_rtp_mux_setcaps ( mux, caps);
-      gst_event_unref (event);
-      return ret;
-    }
-    case GST_EVENT_SEGMENT:
-    {
-      const GstSegment *segment;
+      /* do something with the caps */
 
-      gst_event_parse_segment (event, &segment);
-      GST_LOG_OBJECT(mux,"Received segment, format=%u\n",segment->format) ;
-
-#if 0
-      /* We don't support non time NEWSEGMENT events */
-      if (segment->format != GST_FORMAT_TIME) {
-        gst_event_unref (event);
-        event = NULL;
-        break;
-      }
-#endif
-
-      gst_segment_copy_into (segment, &dcv_pad->segment);
+      /* and forward */
+      ret = gst_pad_event_default (pad, parent, event);
       break;
-    }
-    case GST_EVENT_FLUSH_STOP:
-    {
-      break;
-    }
-    case GST_EVENT_STREAM_START:
-    {
-	    ret = gst_collect_pads_event_default(pads,pad,event,FALSE) ;
-	    GST_LOG_OBJECT(pad->pad, "Processing stream start event by dropping: ret=%ui collect pads state=%u\n",
-			    ret, GST_COLLECT_PADS_STATE(mux->sinkpads)) ;
-	    gst_event_unref(event) ;
-	    return TRUE ;
     }
     default:
+      ret = gst_pad_event_default (pad, parent, event);
       break;
   }
-#endif
-  //if (mux->srcpad) {
-   //return gst_pad_push_event (mux->srcpad, event);
-  // else {
-    return gst_collect_pads_event_default (pads, pad, event, FALSE);
-  //
-}
-
-static void
-gst_rtp_mux_ready_to_paused (GstDcvRTPMux * rtp_mux)
-{
-
-  GST_OBJECT_LOCK (rtp_mux);
-
-  g_clear_object (&rtp_mux->last_pad);
-  rtp_mux->send_stream_start = TRUE;
-
-  if (rtp_mux->seqnum_offset == -1)
-    rtp_mux->seqnum_base = g_random_int_range (0, G_MAXUINT16);
-  else
-    rtp_mux->seqnum_base = rtp_mux->seqnum_offset;
-  rtp_mux->seqnum = rtp_mux->seqnum_base;
-
-  if (rtp_mux->ts_offset == -1)
-    rtp_mux->ts_base = g_random_int ();
-  else
-    rtp_mux->ts_base = rtp_mux->ts_offset;
-
-  rtp_mux->last_stop = GST_CLOCK_TIME_NONE;
-
-  if (rtp_mux->have_ssrc)
-    rtp_mux->current_ssrc = rtp_mux->ssrc;
-
-  GST_DEBUG_OBJECT (rtp_mux, "set timestamp-offset to %u", rtp_mux->ts_base);
-
-  GST_OBJECT_UNLOCK (rtp_mux);
-}
-
-static GstStateChangeReturn
-gst_dcv_rtp_mux_change_state (GstElement * element, GstStateChange transition)
-{
-  GstDcvRTPMux *rtp_mux;
-  GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
-
-  rtp_mux = GST_DCV_RTP_MUX (element);
-
-  GST_LOG_OBJECT(element, "state transition request:%u\n",transition) ;
-  switch (transition) {
-    case GST_STATE_CHANGE_READY_TO_PAUSED:
-      gst_rtp_mux_ready_to_paused (rtp_mux);
-      gst_collect_pads_start (rtp_mux->sinkpads);
-      gst_collect_pads_set_flushing (rtp_mux->sinkpads,FALSE);
-      if (gst_pad_set_active(rtp_mux->srcpad,TRUE) != TRUE) {
-	      GST_LOG_OBJECT(rtp_mux->srcpad, "Couldn't activate\n") ;
-      }
-      break;
-
-  //ret = GST_ELEMENT_CLASS (parent_class)->change_state (element,
-   //   transition);
-
-    case GST_STATE_CHANGE_NULL_TO_READY:
-    case GST_STATE_CHANGE_PAUSED_TO_READY:
-      g_clear_object (&rtp_mux->last_pad);
-      gst_collect_pads_start (rtp_mux->sinkpads);
-      gst_collect_pads_set_flushing (rtp_mux->sinkpads,FALSE);
-      if (gst_pad_set_active(rtp_mux->srcpad,TRUE) != TRUE) {
-	      GST_LOG_OBJECT(rtp_mux->srcpad, "Couldn't activate\n") ;
-      }
-      break;
-    default:
-      break;
-  }
-  GST_LOG_OBJECT(element, "sink pad status:%u src pad active:%s\n",
-		  GST_COLLECT_PADS_STATE(rtp_mux->sinkpads),
-		  gst_pad_is_active(rtp_mux->srcpad) ? "Yes":"No") ;
   return ret;
 }
 
-gboolean
-gst_dcvrtp_mux_plugin_init (GstPlugin * plugin)
+/* chain function
+ * this function does the actual processing
+ */
+dcvrtpmux_bufq_loc_t * getQueue(GstObject *parent, GstPad *pad)
 {
-  GST_DEBUG_CATEGORY_INIT (gst_dcv_rtp_mux_debug, "dcvrtpmux", 0, "rtp muxer");
-
-  return gst_element_register (plugin, "dcvrtpmux", GST_RANK_NONE,
-      GST_TYPE_DCV_RTP_MUX);
-}
-
-GstFlowReturn
-gst_dcv_rtp_mux_collected (GstCollectPads * pads, GstDcvRTPMux * dcv_mux)
-{
-  GST_LOG_OBJECT (dcv_mux, "collected");
-  GstBuffer *inbuf;
-  GstCollectData *collect_data = NULL;
-  guint outsize = 0;
-  GSList *walk;
-  gboolean eos=true ;
-  GstFlowReturn retval = GST_FLOW_OK ;
-  static guint nextpad = 0 ;
-  guint testpad = 0;
-  char *padname = (nextpad == 0 ? "sink_0" : "sink_1") ;
-
-  g_print("nextpad=%u max=%u\n",nextpad,dcv_mux->active_pads) ;
-  walk = pads->data;
-  for (walk = pads->data; walk; walk = walk->next,testpad++) {
-    GstDcvRtpPadData *pdata = (GstDcvRtpPadData *)walk->data ;
-    GstCollectData *tmp = (GstCollectData *) walk->data;
-    
-    g_print("Trying pad :%s\n",pdata->padname) ;
-    if (tmp->buffer) {
-	eos = false ;
-	g_print("dcv_rtp_mux:found buffer in %u, (%s,%s)\n",nextpad,pdata->padname,padname) ;
-	if (gst_pad_is_blocking(dcv_mux->srcpad)) {
-		g_print("Outbound pad is blocking\n") ;
+	guint i;
+  	GstDcvRtpMux_t *filter = GST_DCVRTPMUX(parent);
+	for (i=0; i<filter->nsinks; i++) {
+		if (pad == filter->sinkpads[i]) {
+			return &(filter->padq[i]) ;
+		}
 	}
-	if (strcmp(pdata->padname,padname)) continue ;
-      	collect_data = tmp;
-  	outsize = gst_buffer_get_size (collect_data->buffer);
-  	inbuf = gst_collect_pads_take_buffer (pads, collect_data, outsize);
-  	GST_LOG_OBJECT (dcv_mux, "forward buffer %p\n", inbuf);
-	pdata->txsize += gst_buffer_get_size(inbuf) ;
-  	g_print ("dcv_rtp_mux:forward buffer %p: total tx size=%u\n", inbuf,pdata->txsize);
-  	retval = gst_pad_push (dcv_mux->srcpad, inbuf);
-	nextpad = (nextpad+1)%2 ;
-	return retval ;
-    }
-  }
-
-  /* can only happen when no pads to collect or all EOS */
-  if (eos == false)
-	  return retval ;
-
-#if 0
-  if (dcv_mux->first) {
-    GstSegment segment;
-
-    gst_segment_init (&segment, GST_FORMAT_BYTES);
-    gst_pad_push_event (aggregator->srcpad,
-        gst_event_new_stream_start ("test"));
-    gst_pad_push_event (aggregator->srcpad, gst_event_new_segment (&segment));
-    aggregator->first = FALSE;
-  }
-#endif
-
-  /* just forward the first buffer */
-  /* ERRORS */
-eos:
-  {
-    GST_DEBUG_OBJECT (dcv_mux, "no data available, must be EOS");
-    gst_pad_push_event (dcv_mux->srcpad, gst_event_new_eos ());
-    return GST_FLOW_EOS;
-  }
+	return NULL ;
 }
-static GstFlowReturn
-gst_dcv_rtp_mux_buffer_collected (GstCollectPads * pads, GstCollectData * Data, GstBuffer * buffer, GstDcvRTPMux * dcv_mux)
+
+static GstFlowReturn dcvrtpmux_ProcessQueues(GstDcvRtpMux_t *filter)
 {
+	static guint nextq = 0 ;
+	guint qid = 0;
+	for (qid = 0; qid < filter->nsinks; qid++) 
+	{	
+		dcvrtpmux_bufq_loc_t *ld = &filter->padq[(qid+nextq)%filter->nsinks] ;
+		if (g_queue_is_empty(ld->pD.bufq)) {
+			continue ;
+		}
+		else if (qid != 0 && (g_queue_get_length(ld->pD.bufq) < 5))
+			continue ;
 
-  GST_LOG_OBJECT (dcv_mux, "buffer collected");
-  gst_buffer_unref(buffer) ;
-  return GST_FLOW_OK;
+		GstBuffer *nbuf = g_queue_pop_head(ld->pD.bufq) ;
+		if (qid == 0) nextq = (nextq + 1)%filter->nsinks ;
+		GST_LOG_OBJECT(filter,"Pushing packet to src, next q is %u\n",nextq) ;
+		return gst_pad_push(filter->srcpad,nbuf) ;
+	}
+	GST_LOG_OBJECT(filter,"There's nothing to be sent\n") ;
+	return GST_FLOW_OK ;
 }
+
+static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * parent, GstBuffer * buf)
+{
+  GstDcvRtpMux_t *filter = GST_DCVRTPMUX(parent);
+  dcvrtpmux_bufq_loc_t * ld ;
+  ld = getQueue(parent,pad) ;
+  ld->caps = gst_pad_get_current_caps(pad) ;
+
+  if (filter->silent == FALSE)
+  {
+    if (filter->dcvrtpmux_nf == 0)
+    	GST_LOG_OBJECT (parent,"DCV RTP buffer rx: (%d) caps %s\n", filter->dcvrtpmux_nf,gst_caps_to_string(ld->caps)) ;
+    else
+    	GST_LOG_OBJECT (parent,"DCV RTP buffer rx: (%d) \n", filter->dcvrtpmux_nf) ;
+  }
+  filter->dcvrtpmux_nf++ ;
+
+  g_queue_push_tail(ld->pD.bufq,buf)  ;
+  return dcvrtpmux_ProcessQueues(filter) ;
+}
+
+
+/* entry point to initialize the plug-in
+ * initialize the plug-in itself
+ * register the element factories and other features
+ */
+static gboolean
+dcvrtpmux_init (GstPlugin * dcvrtpmux)
+{
+  /* debug category for fltering log messages
+   *
+   * exchange the string 'Template dcvrtpmux' with your description
+   */
+  GST_DEBUG_CATEGORY_INIT (gst_dcvrtpmux_debug, "gst_dcvrtpmux",
+      0, "Template dcvrtpmux");
+
+  return gst_element_register (dcvrtpmux, "dcvrtpmux", GST_RANK_NONE,
+      GST_TYPE_DCVRTPMUX);
+}
+
 /* PACKAGE: this is usually set by meson depending on some _INIT macro
  * in meson.build and then written into and defined in config.h, but we can
  * just set it ourselves here in case someone doesn't use meson to
  * compile this code. GST_PLUGIN_DEFINE needs PACKAGE to be defined.
  */
 #ifndef PACKAGE
-#define PACKAGE "dcvrtpmux"
+#define PACKAGE "myfirstdcvrtpmux"
 #endif
 
-/* gstreamer looks for this structure to register dcvs
+/* gstreamer looks for this structure to register dcvrtpmuxs
  *
- * exchange the string 'Template dcv' with your dcv description
+ * exchange the string 'Template dcvrtpmux' with your dcvrtpmux description
  */
 #define PACKAGE_VERSION "1.0"
 #define GST_LICENSE "GPL"
@@ -1186,8 +419,8 @@ GST_PLUGIN_DEFINE (
     GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
     dcvrtpmux,
-    "dcv muxer for dscope",
-    gst_dcvrtp_mux_plugin_init,
+    "dcvrtpmux for dscope",
+    dcvrtpmux_init,
     PACKAGE_VERSION,
     GST_LICENSE,
     GST_PACKAGE_NAME,
