@@ -15,9 +15,11 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
-#include "gstdcv.h"
 #include "gutils.hpp"
+#include "gstdcv.h"
 #include "dsopencv.hpp"
+GST_DEBUG_CATEGORY_STATIC (dscope_debug);
+#define GST_CAT_DEFAULT dscope_debug
 static void help(char *name)
 {
 	g_print("Usage: %s -f <input file, mp4 format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
@@ -213,7 +215,7 @@ int main( int argc, char** argv )
 	}
 
 	gst_init(&argc, &argv) ;
-	GST_DEBUG_CATEGORY_INIT (my_category, "gdyn", 0, "This is my very own");
+	GST_DEBUG_CATEGORY_INIT (dscope_debug, "gdyn", 0, "This is my very own");
 
 	g_print("Using txport = %u\n",txport) ;
 	

@@ -74,8 +74,8 @@
 //#include <gst/base/gsttypefindhelper.h>
 
 #include "rseq.h"
-#include "gstdcv.h"
 #include "gutils.hpp"
+#include "gstdcv.h"
 #include "dcvopencv.hpp"
 #define CV_WARN(...) CV_LOG_WARNING(NULL, "OpenCV | GStreamer warning: " << __VA_ARGS__)
 

@@ -67,6 +67,7 @@ typedef struct {
 typedef struct {
 	dcvrtpmux_bufq_t pD ;
 	GstCaps * caps ;
+  	gboolean eosRcvd ;
 } dcvrtpmux_bufq_loc_t  ;
 
 typedef struct {

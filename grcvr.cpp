@@ -12,10 +12,12 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
-#include "gstdcv.h"
 #include "gutils.hpp"
+#include "gstdcv.h"
 #include "dsopencv.hpp"
 
+GST_DEBUG_CATEGORY_STATIC (dscope_debug);
+#define GST_CAT_DEFAULT dscope_debug
 
 static void help(char *name)
 {
@@ -150,7 +152,7 @@ int main( int argc, char** argv )
 		else ;
 	}
 	gst_init(&argc, &argv) ;
-	GST_DEBUG_CATEGORY_INIT (my_category, "dcv", 0, "This is my very own");
+	GST_DEBUG_CATEGORY_INIT (dscope_debug, "dcv", 0, "This is my very own");
 	if (grcvrMode == GRCVR_INTERMEDIATE) pdesc = relaydesc ;
 	sprintf(srcdesc,pdesc,(localdisplay == true? "autovideosink":"fakesink")) ;
 	printf("pdesc=%s\n",srcdesc);

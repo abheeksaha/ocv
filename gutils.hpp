@@ -13,8 +13,6 @@ typedef enum {
 	EOS_DSRC,
 	MAX_EOS_TYPES
 } eos_e ;
-GST_DEBUG_CATEGORY_STATIC (my_category);
-#define GST_CAT_DEFAULT my_category
 
 
 typedef enum {
@@ -28,13 +26,18 @@ typedef struct {
 	gboolean finished ;
 }srcstate_t ;
 
-#if 0
+#if 1
 typedef struct {
 	GQueue *bufq;
 	struct timeval lastData;
 	struct timezone tz;
 	int entries ;
 } dcv_bufq_t ;
+
+typedef struct {
+	dcv_bufq_t *pD ;
+	GstCaps * caps ;
+} dcv_bufq_loc_t  ;
 
 
 typedef struct {

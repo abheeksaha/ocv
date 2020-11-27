@@ -69,7 +69,7 @@
 #include "opencv2/highgui.hpp"
 
 #include "../rseq.h"
-#include "dcvutils.h"
+#include "gutils.hpp"
 #include "gstdcv.h"
 #include "dsopencv.hpp"
 

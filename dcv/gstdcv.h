@@ -62,7 +62,7 @@ typedef enum {
 	GRCVR_LAST
 } grcvr_mode_e ;
 
-
+#if 0
 typedef struct {
 	GQueue *bufq;
 	struct timeval lastData;
@@ -81,6 +81,7 @@ typedef struct {
 	struct timeval ctime;
 	struct timezone ctz;
 } dcv_BufContainer_t ;
+#endif
 
 typedef struct {
 	dcv_bufq_t dataqueue;
@@ -133,6 +134,8 @@ typedef int (* dcv_fn_t )(void * img, void *dataIn, int insize, void * pointlist
 #define GST_IS_DCV_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_DCV))
 
 static int dcvProcessQueuesDcv(Gstdcv * filter) ;
+gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD) ;
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb) ;
 /* Standard function returning type information. */
 GType gst_my_filter_get_type (void);
 G_END_DECLS

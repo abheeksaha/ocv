@@ -107,6 +107,7 @@ static void gst_dcvrtpmux_set_property (GObject * object, guint prop_id,
 static void gst_dcvrtpmux_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
+dcvrtpmux_bufq_loc_t * getQueue(GstObject *parent, GstPad *pad) ;
 static gboolean gst_dcvrtpmux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
 static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * parent, GstBuffer * buf);
 static GstPad *gst_dcvrtpmux_request_new_pad (GstElement * element,
@@ -221,6 +222,7 @@ gst_dcvrtpmux_request_new_pad (GstElement * element,
 	ppad->pD.bufq = g_queue_new() ;
 	ppad->pD.entries = 0;
 	ppad->caps = caps ;
+	ppad->eosRcvd = false ;
 	
 	dcv_rtp_mux->nsinks++ ;
 	GST_LOG_OBJECT(dcv_rtp_mux,"Added new pad :%s, active pads=%u\n",
@@ -314,6 +316,24 @@ gst_dcvrtpmux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       ret = gst_pad_event_default (pad, parent, event);
       break;
     }
+    case GST_EVENT_EOS:
+    {
+	guint i;
+	gboolean empty = true ;
+	dcvrtpmux_bufq_loc_t *ld = getQueue(parent,pad) ;
+	ld->eosRcvd = true ;
+	for (i=0; i<filter->nsinks ; i++)
+	{
+		dcvrtpmux_bufq_loc_t *ld = &(filter->padq[i]) ;
+		if (!g_queue_is_empty(ld->pD.bufq)) {
+			empty = false ;
+			break ;
+		}
+	}
+	if (empty) ret = gst_pad_event_default(pad, parent,event) ;
+	else ret = true ;
+	break ;
+    }
     default:
       ret = gst_pad_event_default (pad, parent, event);
       break;
@@ -358,8 +378,21 @@ static GstFlowReturn dcvrtpmux_ProcessQueues(GstDcvRtpMux_t *filter)
 	return GST_FLOW_OK ;
 }
 
+gboolean dcvrtpmux_CanSendEos(GstDcvRtpMux_t *filter)
+{
+	int i;
+	for (i=0; i<filter->nsinks; i++) {
+		dcvrtpmux_bufq_loc_t *ld = &(filter->padq[i]) ;
+		if (!g_queue_is_empty(ld->pD.bufq) || ld->eosRcvd == false) 
+			break ;
+	}
+	if (i < filter->nsinks) return false ;
+	else return true;
+}
+
 static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
+  GstFlowReturn retval ;
   GstDcvRtpMux_t *filter = GST_DCVRTPMUX(parent);
   dcvrtpmux_bufq_loc_t * ld ;
   ld = getQueue(parent,pad) ;
@@ -375,7 +408,20 @@ static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * pa
   filter->dcvrtpmux_nf++ ;
 
   g_queue_push_tail(ld->pD.bufq,buf)  ;
-  return dcvrtpmux_ProcessQueues(filter) ;
+  if ( (retval = dcvrtpmux_ProcessQueues(filter)) == GST_FLOW_OK) {
+	if (dcvrtpmux_CanSendEos(filter)) {
+#if 0
+		GstEvent *event = gst_event_new_eos() ;
+		retval = gst_pad_push_event(filter->srcpad,event) ;
+#endif
+		GST_WARNING_OBJECT(parent,"Conditions achieved for sending eos\n") ;
+		return retval ;
+	}
+	else
+		return retval ;
+  }
+  else
+	return retval ;
 }
 
 
