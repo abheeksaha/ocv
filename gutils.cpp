@@ -45,9 +45,10 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
           terminate = TRUE;
           break;
         case GST_MESSAGE_STATE_CHANGED:
+#if 0
           /* We are only interested in state-changed messages from the pipeline */
 	  GstElement *msgsrc = GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)) ;
-          if (GST_MESSAGE_SRC (msg) == GST_OBJECT (pipeline)) 
+          if (msgsrc == GST_OBJECT (pipeline)) 
 	  {
             GstState pending_state;
             gst_message_parse_state_changed (msg, ostate, nstate, &pending_state);
@@ -55,7 +56,11 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
 			    GST_ELEMENT_NAME(msgsrc),
                 gst_element_state_get_name (*ostate), gst_element_state_get_name (*nstate));
           }
+	  else {
+		g_print("Gst message source is not pipeline\n") ;
+	  }
           break;
+#endif
 	case GST_MESSAGE_QOS:
 	  g_print("Received a QoS message from : %s", GST_ELEMENT_NAME(GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)))) ; 
 	  break ;
@@ -142,6 +147,8 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 	static int count=0;
 	struct timeval Tv;
 	struct timezone tz;
+	static char opstr[1023] ;
+	static char *pop = opstr ;
 	u32 *pA = (u32 *)A ;
 	tag_t *pd = (tag_t *)B ;
 	pd->count = count++ ;
@@ -152,7 +159,7 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 		pd->seq[i] = rseq[i] ;
 	pd->checksum=0;
 	/* Now write the checksum at the end */
-	g_print("Tag:count=%u tstmp=%u Sequence of size %u ", pd->count,pd->tstmp, RSEQSIZE) ;
+	pop += sprintf(pop,"Tag:count=%u tstmp=%u Sequence of size %u ", pd->count,pd->tstmp, RSEQSIZE) ;
 	for (i=0; i<RSEQSIZE; i++)
 	{
 		if (rseq[i] >= isz/sizeof(u32)) {
@@ -160,10 +167,11 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 				rseq[i], isz) ;
 			g_assert(rseq[i] < (isz/sizeof(u32))) ;
 		}
-		g_print("pA[%u]=%u ",rseq[i],pA[rseq[i]]) ;
+		pop += sprintf(pop,"pA[%u]=%u ",rseq[i],pA[rseq[i]]) ;
 		pd->checksum ^= pA[rseq[i]] ;
 	}
-	g_print("Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
+	pop += sprintf(pop,"Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
+	//g_print("%s\n",opstr) ;
 }
 
 gint dcvTimeDiff(struct timeval t1, struct timeval t2)

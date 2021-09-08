@@ -18,8 +18,10 @@
 #include "gutils.hpp"
 #include "gstdcv.h"
 #include "dsopencv.hpp"
+#if 1
 GST_DEBUG_CATEGORY_STATIC (dscope_debug);
 #define GST_CAT_DEFAULT dscope_debug
+#endif
 static void help(char *name)
 {
 	g_print("Usage: %s -f <input file, mp4 format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
@@ -36,6 +38,7 @@ typedef struct {
 	GstAppSink *vsink;
 	GstAppSrc  *dsrc;
 	GstAppSrc  *vdisp;
+	GstElement *dcv ;
 	/* Output elements **/
 	GstElement *mux;
 	GstElement *op;
@@ -71,11 +74,12 @@ volatile gboolean terminate ;
 volatile gboolean sigrcvd = FALSE ;
 
 static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
-			  dcvrtpmux name=mux ! queue name=usq  ! appsink name=usink \
-			  tpoint.src_0 ! queue name=t1 ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale !  appsink name=vsink \
-			  tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=t2 ! mux.sink_0 \
-			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
-			  appsrc name=dsrc ! queue name=dsq ! rtpgstpay name=rgpy ! mux.sink_1";
+	dcv name=dcvSender \
+	dcvrtpmux name=mux ! queue name=usq  ! appsink name=usink \
+	tpoint.src_0 ! queue name=t1 ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
+	tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=t2 ! mux.sink_0 \
+	dcvSender.video_src ! video/x-raw,format=BGR ! %s \
+	dcvSender.rtp_src ! queue name=dsq ! rtpgstpay name=rgpy ! mux.sink_1";
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
 		       rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint \
@@ -153,6 +157,7 @@ int main( int argc, char** argv )
 	char graphfile[1024] ; 
 	gboolean graphdump = false ;
 	char qarg[1024] ;
+	grcvr_mode_e grcvrMode = GRCVR_FIRST ;
 
 	strcpy(videofile,"v1.webm") ;
 	strcpy(clientipaddr,"192.168.1.71") ;
@@ -325,6 +330,7 @@ int main( int argc, char** argv )
 			g_print("Rtp GST Pay wants %s caps \n", gst_caps_to_string(t)) ;
 			g_object_set(G_OBJECT(ge), "pt", 102 ,NULL) ;
 		}
+		if (gst_bin_get_by_name(GST_BIN(D.pipeline),"dsrc"))
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"dsrc") ; g_assert(ge) ;
 			D.dsrc = GST_APP_SRC_CAST(ge) ;
@@ -332,14 +338,31 @@ int main( int argc, char** argv )
 		  		"media",G_TYPE_STRING,"application","clock-rate",G_TYPE_INT,90000,"payload",G_TYPE_INT,102,"encoding-name",G_TYPE_STRING,"X-GST",NULL) ;
 			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eos[EOS_DSRC],caps) ;
 		}
+		if (D.vsink != NULL)
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 
 		}
+		if (gst_bin_get_by_name(GST_BIN(D.pipeline),"vdisp"))
 		{
 			D.vdisp = GST_APP_SRC_CAST(gst_bin_get_by_name( GST_BIN(D.pipeline), "vdisp")) ;
 			g_assert(D.vdisp) ;
 			GstCaps *srccaps = gst_caps_new_simple ( "video/x-raw", NULL ) ;
 		 	dcvConfigAppSrc(D.vdisp, NULL , NULL, NULL , NULL, eosRcvdSrc, &D.eos[EOS_VDISP],srccaps) ;
+		}
+		{
+			
+			GValue valueFn = { 0 } ;
+			GValue valueMode = { 0 } ;
+			gst_dcv_stage_t F ;
+			F.sf = stage1 ;
+			D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvSender") ;
+			g_print("Setting execution function for %s\n",gst_element_get_name(D.dcv)) ;
+			g_value_init(&valueFn,G_TYPE_POINTER) ;
+			g_value_set_pointer(&valueFn,gpointer(&F)) ;
+			g_object_set(G_OBJECT(D.dcv),"stage-function",gpointer(&F),NULL);
+			g_value_init(&valueMode,G_TYPE_INT) ;
+			g_value_set_int(&valueMode,grcvrMode) ;
+			g_object_set(G_OBJECT(D.dcv),"grcvrMode",GRCVR_FIRST,NULL);
 		}
 	}
 	
@@ -372,15 +395,19 @@ int main( int argc, char** argv )
 		gst_object_unref (D.pipeline);
 		return -1;
 	}
+	if (D.dsrc) {
 	ret = gst_element_set_state(GST_ELEMENT_CAST(D.dsrc),GST_STATE_PLAYING) ;
 	if (ret == GST_STATE_CHANGE_FAILURE) {
 		g_print ("Unable to set data src to the playing state.\n");
 		return -1;
 	}
+	}
+	if (D.vsink) {
 	if ( ( ret = gst_element_set_state(GST_ELEMENT_CAST(D.vsink),GST_STATE_PLAYING)) == GST_STATE_CHANGE_FAILURE)
 	{
 		g_print("Couldn't set vsink state to playing\n") ;
 		return -1;
+	}
 	}
 
 	ret = gst_element_set_state(GST_ELEMENT_CAST(D.usink),GST_STATE_PLAYING) ;
@@ -388,10 +415,12 @@ int main( int argc, char** argv )
 		g_print ("Unable to set usink to the playing state.\n");
 		return -1;
 	}
+	if (D.vdisp) {
 	if ( ( ret = gst_element_set_state(GST_ELEMENT_CAST(D.vdisp),GST_STATE_PLAYING)) == GST_STATE_CHANGE_FAILURE)
 	{
 		g_print("Couldn't set vdisp state to playing\n") ;
 		return -1;
+	}
 	}
 
 	GstState oldstate,newstate=GST_STATE_NULL ;
@@ -437,6 +466,7 @@ int main( int argc, char** argv )
 		}
 			
 		if (newstate >= GST_STATE_READY) {
+#if 0
 			while (D.dsrcstate.state == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
 				dcv_BufContainer_t *dv ;
 				ctr = 0 ;
@@ -453,10 +483,17 @@ int main( int argc, char** argv )
 // Add a message dat	
 					if ( dotx && (databuf != NULL) )
 					{
+						if (GST_IS_BUFFER(databuf))
+						{
 						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
 						g_print("Pushing data buffer number %d...(ret=%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
 								++numDataFrames, ret,g_queue_get_length(D.dq.bufq),D.eos[EOS_DSRC], D.eos[EOS_USINK], D.eos[EOS_VDISP], D.eos[EOS_VSINK]) ;
 						g_print("Bytes sent:%d\n", D.ftc->sentbytes) ;
+						}
+						else {
+							g_print ("Whoa!! This is not a valid buffer!\n") ;
+							gst_buffer_unref(databuf) ;
+						}
 					}
 					dcvBufContainerFree(dv) ;
 					free(dv) ;
@@ -469,6 +506,7 @@ int main( int argc, char** argv )
 
 				}
 			}
+#endif
 			if (++notprocessed == 5) {
 				if (dcvGstDebug & 0x02 == 0x02) g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
 				notprocessed = 0 ;

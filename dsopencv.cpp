@@ -96,6 +96,7 @@ namespace cv {
 
 static void toFraction(double decimal, CV_OUT int& numerator, CV_OUT int& denominator);
 static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutputByteBuffer, GstCaps *frame_caps) ;
+void putFrameNum(cv::Mat img, int fno) ;
 
 //==================================================================================================
 
@@ -104,15 +105,16 @@ static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutput
  * \return IplImage pointer. [Transfer Full]
  *  Retrieve the previously grabbed buffer, and wrap it in an IPLImage structure
  */
-gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, Mat * img,dcvFrameData_t *df)
+cv::Mat * retrieveFrame(GstBuffer * buf, GstCaps * caps, dcvFrameData_t *df)
 {
+	cv::Mat * img ;
     if (!buf)
-        return false;
+        return NULL;
     Size sz;
     df->channels = 0;
     df->isOutputByteBuffer = false ;
     if (determineFrameDims(&sz, &df->channels, &df->isOutputByteBuffer, caps) != true)
-        return false;
+        return NULL;
     df->height = sz.height ;
     df->width = sz.width ;
 
@@ -123,7 +125,7 @@ gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, Mat * img,dcvFrameData_t
     {
         //something weird went wrong here. abort. abort.
         CV_WARN("Failed to map GStreamer buffer to system memory");
-        return false;
+        return NULL;
     }
 
     try
@@ -141,7 +143,7 @@ gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, Mat * img,dcvFrameData_t
     }
     gst_buffer_unmap(buf, &info);
 
-    return true;
+    return img;
 }
 
 static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutputByteBuffer, GstCaps *frame_caps)
@@ -240,7 +242,7 @@ static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutput
  * The timestamp for the buffer is generated from the framerate set in open
  * and ensures a smooth video
  */
-GstBuffer * writeFrame( const Mat * img, dcvFrameData_t *df)
+GstBuffer * writeFrame( Mat * img, dcvFrameData_t *df)
 {
 	GstClockTime duration, timestamp;
 	GstBuffer *gb ;
@@ -297,14 +299,36 @@ void toFraction(const double decimal, int &numerator_i, int &denominator_i)
 	//printf("%g: %d/%d    (err=%g)\n", decimal, numerator_i, denominator_i, err);
 }
 	
+void putFrameNum(Mat img, int fno)
+{
+	char text[24] ;
+	int fontFace = FONT_HERSHEY_SCRIPT_SIMPLEX;
+	double fontScale = 1.5;
+	int thickness = 3;
+	int baseline=0;
+	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
+	baseline += thickness;
+// center the text
+	Point textOrg((img.cols - textSize.width)/2, (img.rows + textSize.height)/2);
+
+// draw the box
+	rectangle(img, textOrg + cv::Point(0, baseline), textOrg + cv::Point(textSize.width, -textSize.height), cv::Scalar(0,0,255));
+
+// ... and the baseline first
+	line(img, textOrg + cv::Point(0, thickness), textOrg + cv::Point(textSize.width, thickness), cv::Scalar(0, 0, 255));
+
+// then put the text itself
+	sprintf(text,"fno=%d",fno) ;
+	putText(img, text, textOrg, fontFace, fontScale, cv::Scalar::all(255), thickness, 8);
+}
+
 } //End of cv namespace
 	
-using namespace cv;
+//using namespace cv;
 using namespace std;
-void putFrameNum(Mat img, int fno) ;
 #include <vector>
 	/** Write a vector of points to an output array and vice versa **/
-int writeToArray(vector<Point> vlist, char *op, int opsize)
+int writeToArray(vector<cv::Point> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
@@ -314,7 +338,7 @@ int writeToArray(vector<Point> vlist, char *op, int opsize)
 	}
 	pop += step ; tstep  += step;
 	if (foeDebug()) { printf("Writing vector of points:%d\n",vlist.size()) ; }
-	for (vector<Point>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
+	for (vector<cv::Point>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
 	{
 		step = sprintf(pop,"%.4g,%.4g\n",(float)it->x, (float)it->y);
 		if (foeDebug()) printf("[%.4g %.4g] ",(float)it->x,(float)it->y) ;
@@ -323,7 +347,7 @@ int writeToArray(vector<Point> vlist, char *op, int opsize)
 	if (foeDebug()) printf("\n") ;
 	return tstep ;
 }
-int writeToArray(vector<Point2f> vlist, char *op, int opsize)
+int writeToArray(vector<cv::Point2f> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
@@ -332,7 +356,7 @@ int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 		return step ;
 	}
 	pop += step ; tstep  += step;
-	for (vector<Point2f>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
+	for (vector<cv::Point2f>::iterator it = vlist.begin() ; it != vlist.end(); ++it)
 	{
 		step = sprintf(pop,"%.4g,%.4g\n",it->x, it->y);
 		pop += step ; tstep  += step;
@@ -341,7 +365,7 @@ int writeToArray(vector<Point2f> vlist, char *op, int opsize)
 }
 
 #ifdef FOESTAGE
-int writeToArrayContours(vector<vector<Point2f>> vlist, char *op, int opsize)
+int writeToArrayContours(vector<vector<cv::Point2f>> vlist, char *op, int opsize)
 {
 	char *pop = op ;
 	int step, tstep=0;
@@ -369,7 +393,7 @@ int writeToArrayContours(vector<vector<Point2f>> vlist, char *op, int opsize)
 // Entry can be a point or a list of points.
 // List of points are given with a starting [Size:]
 //
-int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
+int readFromBuffer(char *op,int sz, vector<cv::Point2f> & pvlist)
 {
 	char *pop = op ;
 	char *tok ;
@@ -397,7 +421,7 @@ int readFromBuffer(char *op,int sz, vector<Point2f> & pvlist)
 	return it ;
 }
 #ifdef FOESTAGE
-int readFromBufferContours(char *op, int sz, vector <vector<Point2f>> &pvlist)
+int readFromBufferContours(char *op, int sz, vector <vector<cv::Point2f>> &pvlist)
 {
 	char *pop = op ;
 	char *tok ;
@@ -427,24 +451,24 @@ int readFromBufferContours(char *op, int sz, vector <vector<Point2f>> &pvlist)
 }
 #endif
 	
-gboolean frameToImg(GstBuffer *buf, GstCaps *caps, Mat *img, dcvFrameData_t *df)
+cv::Mat * frameToImg(GstBuffer *buf, GstCaps *caps, dcvFrameData_t *df)
 {
-	gboolean retval =  retrieveFrame(buf,caps,img, df);
-	return retval;
+	cv::Mat * img =  cv::retrieveFrame(buf,caps, df);
+	return img;
 }
 	
-TermCriteria termcrit(TermCriteria::COUNT|TermCriteria::EPS,20,0.03);
+cv::TermCriteria termcrit(cv::TermCriteria::COUNT|cv::TermCriteria::EPS,20,0.03);
 #define THRESH 1
-gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
+gboolean bigdiff(vector<cv::Point2f> v1, vector<cv::Point2f> v2)
 {
 	float diff = 0 ;
-	vector<Point2f>::iterator it;
-	vector<Point2f>::iterator it2;
+	vector<cv::Point2f>::iterator it;
+	vector<cv::Point2f>::iterator it2;
 	if (v1.empty() || v2.empty()) return true ;
 	else if (v1.size() != v2.size()) return true ;
 	for (it = v1.begin(),it2 = v2.begin() ; it != v1.end() && it2 != v2.end(); ++it,++it2)
 	{
-		Point2f x1,x2 ;
+		cv::Point2f x1,x2 ;
 		x1 = *it ;
 		x2 = *it2;
 		diff += pow(x1.x - x2.x,2) + pow(x1.y - x2.y,2) ;
@@ -453,22 +477,22 @@ gboolean bigdiff(vector<Point2f> v1, vector<Point2f> v2)
 	else return false ;
 }
 	
-int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
+int stage1(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 {
-	Mat gray;
-    	vector<Point2f> pointsg;
-    	Size subPixWinSize(10,10), winSize(31,31);
+	cv::Mat gray = img.clone();
+    	vector<cv::Point2f> pointsg;
+    	cv::Size subPixWinSize(10,10), winSize(31,31);
 	const int MAX_COUNT = 500 ;
 	int size=0;
 	static int count = 1 ;
 	{
-        	cvtColor(img, gray, COLOR_BGR2GRAY);
-		Mat edges(img.size(), CV_8U) ;
-		goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
+        	cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+		cv::Mat edges(gray) ;
+		goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, edges, 3, 3, 0, 0.04);
 		if (pointsg.empty()) printf("No features to track\n") ;
 		else {
 			printf ("%d points to track\n",pointsg.size()) ;
-			cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
+			cornerSubPix(gray, pointsg, subPixWinSize, cv::Size(-1,-1), termcrit);
 		}
 
 		--count ;
@@ -478,7 +502,7 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 		}
 		else
 		{
-			pointsg.resize(0) ;
+			//pointsg.resize(0) ;
 			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 		}
 		if (dcvOptDebug) g_print("Stage1:return %d bytes\n",size) ;
@@ -487,50 +511,51 @@ int stage1(Mat img, void *dataIn, int insize, void * pointlist, int outdatasize)
 	return size;
 }
 	
-int stagen(Mat img, void *pointlist, int pointsize, void *dataout, int outdatasize)
+int stagen(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outdatasize)
 {
 	vector<uchar> status;
 	vector<float> err;
-    	static vector<Point2f> pointsg;
-    	Size subPixWinSize(10,10), winSize(31,31);
-	static Mat gray;
-	static Mat prevGray ;
+    	static vector<cv::Point2f> pointsg;
+    	cv::Size subPixWinSize(10,10), winSize(31,31);
+	static cv::Mat gray(img);
+	static cv::Mat prevGray(img) ;
+	static cv::Mat rdm(img) ;
 	int nitems;
 	int i,size=0;
 	const int MAX_COUNT = 500 ;
 	static int fno=0;
 	
-        cvtColor(img, gray, COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
-	cornerSubPix(gray, pointsg, subPixWinSize, Size(-1,-1), termcrit);
+        cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, rdm, 3, 3, 0, 0.04);
+	cornerSubPix(gray, pointsg, subPixWinSize, cv::Size(-1,-1), termcrit);
 #if 0
 #endif
         for( i = 0; i < pointsg.size(); i++ )
         {
-              circle( img, pointsg[i], 4, Scalar(128,128,0), -1, 8);
+              circle( img, pointsg[i], 4, cv::Scalar(128,128,0), -1, 8);
         }
-	putFrameNum(img, ++fno) ;
+	cv::putFrameNum(img, ++fno) ;
 	size = 0 ;
 	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 	if (dcvOptDebug) g_print("Stagen:return %d bytes\n",size) ;
 //imshow...	
 	return size;
 }
-int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
+int stage2(cv::Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 {
 	vector<uchar> status;
 	vector<float> err;
-    	static vector<vector<Point2f>> points(2);
-	Size winSize(31,31)  ;
-	static Mat gray;
-	static Mat prevGray ;
+    	static vector<vector<cv::Point2f>> points(2);
+	cv::Size winSize(31,31)  ;
+	static cv::Mat gray(img);
+	static cv::Mat prevGray(img) ;
 	int nitems;
 	static int fno = 0 ;
 	int osize=0;
 	
 	if (points[1].size() == 0) 
 		points[1].resize(500) ;
-        cvtColor(img, gray, COLOR_BGR2GRAY);
+        cvtColor(img, gray, cv::COLOR_BGR2GRAY);
 	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
 //	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
 	       g_print("Read from buffer failed\n")	;
@@ -557,7 +582,7 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 			 * of the color you want, each out of 255.  */	
 
 			cv::Scalar line_color = CV_RGB(0,0,255);
-			CvPoint p,q;
+			cv::Point p,q;
 			p.x = (int) points[0][i].x;
 			p.y = (int) points[0][i].y;
 			q.x = (int) points[1][i].x;
@@ -585,7 +610,7 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
             points[1].resize(k);
             points[0].resize(k);
 	}
-	putFrameNum(img,++fno) ;
+	cv::putFrameNum(img,++fno) ;
 	if (dataout != NULL) {
 		osize = writeToArrayContours(points,dataout,outdatasize) ;
 		g_print("Stage 2 returns %d bytes\n",osize) ;
@@ -596,41 +621,20 @@ int stage2(Mat img, void *pointlist, int size, void *dataout, int outdatasize)
 	return osize;
 }
 
-void putFrameNum(Mat img, int fno)
-{
-	char text[24] ;
-	int fontFace = FONT_HERSHEY_SCRIPT_SIMPLEX;
-	double fontScale = 1.5;
-	int thickness = 3;
-	int baseline=0;
-	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
-	baseline += thickness;
-// center the text
-	Point textOrg((img.cols - textSize.width)/2, (img.rows + textSize.height)/2);
-
-// draw the box
-	rectangle(img, textOrg + Point(0, baseline), textOrg + Point(textSize.width, -textSize.height), Scalar(0,0,255));
-
-// ... and the baseline first
-	line(img, textOrg + Point(0, thickness), textOrg + Point(textSize.width, thickness), Scalar(0, 0, 255));
-
-// then put the text itself
-	sprintf(text,"fno=%d",fno) ;
-	putText(img, text, textOrg, fontFace, fontScale, Scalar::all(255), thickness, 8);
-}
 	
 /** Main platform functions **/
 #define MAXSTAGEDATASIZE 16384
 extern "C" 
 GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb)
 {
-	Mat img;
+        int *imgdata ;
 	gboolean res  ;
 	char opdata[MAXSTAGEDATASIZE] ;
 	int size;
 	GstBuffer *newdb = NULL ;
 	g_print("In DCV Process Stage:\n") ;
-	if (frameToImg(vbuf,gcaps,&img,df) == false) {
+	cv::Mat * img = (cv::Mat *)frameToImg(vbuf,gcaps,df) ;
+	if (img == NULL) {
 		printf("Something went wrong extracting image\n") ;
 		return NULL ;
 	}
@@ -646,12 +650,12 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 		{
 			char *op = odmap.data ;
 			op += getTagSize() ;
-			size  = stage(img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
+			size  = stage(*img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
 			gst_memory_unmap(odmem,&odmap) ;
 		}
 	}
 	else {
-		size = stage((cv::Mat)img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
+		size = stage(*img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
 	}
 	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
 	
@@ -683,6 +687,6 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 		newdb = NULL ;
 	
 	/** Now convert img back to buffer **/
-	*newvb = cv::writeFrame(&img, df) ;
+	*newvb = cv::writeFrame(img, df) ;
 	return newdb ;
 }

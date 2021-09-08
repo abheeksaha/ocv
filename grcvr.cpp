@@ -262,13 +262,27 @@ int main( int argc, char** argv )
 
 		}
 		{
+			
+			GValue valueFn = { 0 } ;
+			GValue valueMode = { 0 } ;
 			gst_dcv_stage_t F ;
-			F.sf = stage2 ;
-			D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvTerminal") ;
+			if (grcvrMode == GRCVR_LAST)
+			{
+				F.sf = stage2 ;
+				D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvTerminal") ;
+			}
+			else {
+				F.sf = stagen ;
+				D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvRelay") ;
+			}
 			g_print("Setting execution function for %s\n",gst_element_get_name(D.dcv)) ;
+			g_value_init(&valueFn,G_TYPE_POINTER) ;
+			g_value_set_pointer(&valueFn,gpointer(&F)) ;
 			g_object_set(G_OBJECT(D.dcv),"stage-function",gpointer(&F),NULL);
+			g_value_init(&valueMode,G_TYPE_INT) ;
+			g_value_set_int(&valueMode,grcvrMode) ;
+			g_object_set(G_OBJECT(D.dcv),"grcvrMode",GRCVR_LAST,NULL);
 		}
-
 	}
 
 	ret = gst_element_set_state(GST_ELEMENT_CAST(D.usrc),GST_STATE_PLAYING) ;

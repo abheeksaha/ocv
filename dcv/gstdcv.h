@@ -59,7 +59,8 @@ G_DECLARE_FINAL_TYPE (Gstdcv, gst_dcv,
 typedef enum {
 	GRCVR_FIRST,
 	GRCVR_INTERMEDIATE,
-	GRCVR_LAST
+	GRCVR_LAST,
+	GRCVR_MODEMAX
 } grcvr_mode_e ;
 
 #if 0
