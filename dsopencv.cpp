@@ -107,16 +107,21 @@ void putFrameNum(cv::Mat img, int fno) ;
  */
 cv::Mat * retrieveFrame(GstBuffer * buf, GstCaps * caps, dcvFrameData_t *df)
 {
-	cv::Mat * img ;
+    cv::Mat * img ;
     if (!buf)
         return NULL;
     Size sz;
-    df->channels = 0;
-    df->isOutputByteBuffer = false ;
-    if (determineFrameDims(&sz, &df->channels, &df->isOutputByteBuffer, caps) != true)
+    gint channels = 0 ;
+    gboolean isOutputByteBuffer = false ;
+    if (determineFrameDims(&sz, &channels, &isOutputByteBuffer, caps) != true)
         return NULL;
+
+    if (df) {
+    df->channels = channels;
+    df->isOutputByteBuffer = isOutputByteBuffer ;
     df->height = sz.height ;
     df->width = sz.width ;
+    }
 
     // gstreamer expects us to handle the memory at this point
     // so we can just wrap the raw buffer and be done with it
@@ -130,10 +135,10 @@ cv::Mat * retrieveFrame(GstBuffer * buf, GstCaps * caps, dcvFrameData_t *df)
 
     try
     {
-        if (df->isOutputByteBuffer)
-            *img = Mat(Size(info.size, 1), CV_8UC1, info.data);
+        if (isOutputByteBuffer)
+            img = new Mat(Size(info.size, 1), CV_8UC1, info.data);
         else
-            *img = Mat(sz, CV_MAKETYPE(CV_8U, df->channels), info.data);
+            img = new Mat(sz, CV_MAKETYPE(CV_8U, channels), info.data);
         CV_Assert(img->isContinuous());
     }
     catch (...)

@@ -131,6 +131,7 @@ static void gst_dcv_get_property (GObject * object, guint prop_id,
 static gboolean gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
 static GstFlowReturn gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf);
 static GstFlowReturn gst_dcv_chain_gst (GstPad * pad, GstObject * parent, GstBuffer * buf);
+extern int dcvGstDebug ;
 
 /* GObject vmethod implementations */
 
@@ -282,7 +283,11 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 	gpointer dataFrameWaiting = NULL ;
 	tag_t T ;
 	GstFlowReturn ret = GST_FLOW_ERROR ;
+	extern int donothing(void *) ;
 
+	if (dcvGstDebug)
+		g_print("Entered dcvProcessQueuesDcv: vfmatch=%d, grcvrMode= %u \n",
+			filter->vfmatch, grcvrMode) ;
 	if (filter->vfmatch == -1) {
 		/** We failed last time, see if something has changed **/
 		if ((dcvTimeDiff(pd->videoframequeue.lastData,lastCheck) <= 0) &&
@@ -301,6 +306,11 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 	}
 
 	else if ( ((filter->vfmatch = dcvFindMatchingContainer(pd->videoframequeue.bufq,dataFrameContainer,&T)) == -1) ) {
+		if (dcvGstDebug) 
+		g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
+				g_queue_get_length(pd->videoframequeue.bufq), 
+				g_queue_get_length(pd->olddataqueue.bufq)) ;
+		
 		GST_LOG_OBJECT(GST_OBJECT(filter),"no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
 				g_queue_get_length(pd->videoframequeue.bufq), 
 				g_queue_get_length(pd->olddataqueue.bufq)) ;
@@ -315,16 +325,20 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 #endif
 		gettimeofday(&lastCheck,&tz) ;
 		GST_LOG_OBJECT(GST_OBJECT(filter),"Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
+		if (dcvGstDebug) 
+		g_print("Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
 		return 0 ;
 	}
+	if (dcvGstDebug)
+		g_print("Entering stage function:\n") ;
 GRCVR_PROCESS:
 	{
 		dcv_fn_t stagef = (dcv_fn_t)filter->execFn;
 		dcv_BufContainer_t *qe = ((dcv_BufContainer_t *)g_queue_pop_nth(pd->videoframequeue.bufq,filter->vfmatch)) ;
 		GstBuffer * newVideoFrame = NULL ;
 		GstBuffer * newDataFrame = NULL ;
-		if (dataFrameContainer != NULL) {
-			dataFrameWaiting = dataFrameContainer->nb;
+		if (dataFrameContainer != NULL || grcvrMode == GRCVR_FIRST) {
+			dataFrameWaiting = (dataFrameContainer != NULL ? dataFrameContainer->nb: NULL);
 			videoFrameWaiting = qe->nb ;
 			GstCaps *vcaps = qe->caps ;
 #if 1
@@ -339,21 +353,27 @@ GRCVR_PROCESS:
 			if (gst_pad_is_linked(filter->video_out))
 			{
 				GST_LOG_OBJECT(GST_OBJECT(filter),"Transmitting video frame\n") ;
+				if (dcvGstDebug) g_print("Transmitting video frame\n") ;
 				gst_pad_push(filter->video_out,newVideoFrame) ;
 			}
 			Dv->num_frames++ ;
+			if (dcvGstDebug)
+			g_print("State of queues:vq=%d dq=%d\n", g_queue_get_length(pd->videoframequeue.bufq), 
+					g_queue_get_length(pd->olddataqueue.bufq)) ;
 			GST_LOG_OBJECT(GST_OBJECT(filter),
 			"State of queues:vq=%d dq=%d\n", g_queue_get_length(pd->videoframequeue.bufq), 
 					g_queue_get_length(pd->olddataqueue.bufq)) ;
 					
 				
 
-			if (grcvrMode == GRCVR_INTERMEDIATE) 
+			if (grcvrMode == GRCVR_INTERMEDIATE || grcvrMode == GRCVR_FIRST) 
 			{
 				newDataFrame = gst_buffer_copy(dataFrameWaiting) ;
 				if (gst_pad_is_linked(filter->rtp_out)) {
 					ret = gst_pad_push(filter->rtp_out,newDataFrame) ;
 				}
+				if (dcvGstDebug) g_print("Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
+						ret,++(filter->vbufsnt), g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
 				GST_LOG_OBJECT(GST_OBJECT(filter),
 					"Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
 						ret,++(filter->vbufsnt), g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
@@ -398,7 +418,7 @@ gst_dcv_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   Gstdcv *filter = GST_DCV (object);
-  GST_WARNING_OBJECT(object,"Setting property %u\n",gst_element_get_name(GST_ELEMENT(object)), prop_id) ;
+  GST_WARNING_OBJECT(object,"Setting property %s, value=%u\n",gst_element_get_name(GST_ELEMENT(object)), prop_id) ;
 
   switch (prop_id) {
     case PROP_SILENT:

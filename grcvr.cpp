@@ -19,6 +19,12 @@
 GST_DEBUG_CATEGORY_STATIC (dscope_debug);
 #define GST_CAT_DEFAULT dscope_debug
 
+int donothing(void *obj)
+{
+	GST_WARNING_OBJECT(GST_OBJECT(obj),"Doing Nothing\n") ;
+}
+
+
 static void help(char *name)
 {
 	g_print("Usage: %s -r <port number to listen on> [--mode [inter|first|last] -p txport -i txdest] -l|--localDisplay\n",name) ;  
@@ -166,6 +172,7 @@ int main( int argc, char** argv )
 		g_error_free(gerr) ;
 		exit(1) ;
 	}
+	gst_element_set_name(D.pipeline, "grcvr_pipeline") ;
 	for (int i = 0; i<MAX_EOS_TYPES; i++)
 	{
 		D.eos[i] = FALSE ;

@@ -5,6 +5,7 @@
 #include <gst/gst.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
+#include <gst/gstdebugutils.h>
 #include "rseq.h"
 #include "gutils.hpp"
 
@@ -45,29 +46,36 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
           terminate = TRUE;
           break;
         case GST_MESSAGE_STATE_CHANGED:
-#if 0
+	{
           /* We are only interested in state-changed messages from the pipeline */
 	  GstElement *msgsrc = GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)) ;
-          if (msgsrc == GST_OBJECT (pipeline)) 
+          if (msgsrc == GST_ELEMENT_CAST (pipeline)) 
 	  {
             GstState pending_state;
+		gchar dumpmsg[1024] ;
             gst_message_parse_state_changed (msg, ostate, nstate, &pending_state);
             g_print ("Element %s state changed from %s to %s:\n",
 			    GST_ELEMENT_NAME(msgsrc),
                 gst_element_state_get_name (*ostate), gst_element_state_get_name (*nstate));
+		sprintf(dumpmsg,"%s_graph",gst_element_get_name(GST_ELEMENT_CAST(pipeline))) ;
+		GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS(GST_BIN(pipeline),GST_DEBUG_GRAPH_SHOW_ALL,dumpmsg) ;
           }
 	  else {
-		g_print("Gst message source is not pipeline\n") ;
+		//g_print("Gst message source is not pipeline:%s\n",GST_ELEMENT_NAME(msgsrc)) ;
 	  }
           break;
-#endif
+	}
 	case GST_MESSAGE_QOS:
-	  g_print("Received a QoS message from : %s", GST_ELEMENT_NAME(GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)))) ; 
+	{
+	  g_print("Received a QoS message from : %s\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)))) ; 
 	  break ;
+	}
         default:
+	{
           /* We should not reach here */
           g_printerr ("Unexpected message received.\n");
           break;
+	}
       }
       gst_message_unref (msg);
     }

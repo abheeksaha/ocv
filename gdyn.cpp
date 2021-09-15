@@ -28,6 +28,11 @@ static void help(char *name)
 		       	-l (local display) -e|--intel-edge --graphdump <graphdumpfile> \n",name) ;  
 }
 
+int donothing(void * obj)
+{
+	GST_WARNING_OBJECT(GST_OBJECT(obj),"Doing Nothing\n") ;
+}
+
 static void processbuffer(void *A, int isz, void *B, int osz) ;
 typedef struct {
 	GstElement *pipeline;
@@ -247,6 +252,7 @@ int main( int argc, char** argv )
 		g_printerr("Couldn't create sub-bins\n") ;
 		exit(4) ;
 	}
+	gst_element_set_name(D.pipeline, "gdyn_pipeline") ;
 	D.vsink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsink")) ;
 	D.tpt  = gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint") ;
 	g_object_set(D.tpt,"silent",false, NULL) ;
