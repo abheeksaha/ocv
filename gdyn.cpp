@@ -80,11 +80,12 @@ volatile gboolean sigrcvd = FALSE ;
 
 static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
 	dcv name=dcvSender \
-	dcvrtpmux name=mux ! queue name=usq  ! appsink name=usink \
-	tpoint.src_0 ! queue name=t1 ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
-	tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=t2 ! mux.sink_0 \
+	rtpmux name=mux ! queue name=usq ! appsink name=usink \
+	tpoint.src_0 ! queue name=ddq ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
+	tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=vsq ! mux.sink_0 \
 	dcvSender.video_src ! video/x-raw,format=BGR ! %s \
-	dcvSender.rtp_src ! queue name=dsq ! rtpgstpay name=rgpy ! mux.sink_1";
+	dcvSender.rtp_src ! queue name=dsq ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy pt=102 ! mux.sink_1";
+#if 0
 static char ndesc[] = "rtpbin name=rbin \
 		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
 		       rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint \
@@ -93,6 +94,17 @@ static char ndesc[] = "rtpbin name=rbin \
 			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
 			  appsrc name=vdisp ! video/x-raw,format=BGR ! %s \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+#endif
+static char ndesc[] = "rtpbin name=rbin \
+		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
+		       rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint \
+			dcv name=dcvSender \
+			  rtpmux name=mux ! queue ! appsink  name=usink \
+			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
+			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
+			  dcvSender.video_src ! video/x-raw,format=BGR ! %s \
+			  dcvSender.rtp_src ! queue name=dsq ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
+
 
 /*search if  ip address is assigned to the kni interface*/
 
@@ -453,11 +465,11 @@ int main( int argc, char** argv )
 					"current-level-bytes", &currentBytes,
 					"current-level-time", &currentTime, NULL) ;
 			GST_WARNING("FQ: Backlog  %u, %u\n",currentBytes,currentTime) ;
-			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"t1"),
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"ddq"),
 					"current-level-bytes", &currentBytes,
 					"current-level-time", &currentTime, NULL) ;
 			GST_WARNING("T1: Backlog  %u, %u\n",currentBytes,currentTime) ;
-			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"t2"),
+			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"vsq"),
 					"current-level-bytes", &currentBytes,
 					"current-level-time", &currentTime, NULL) ;
 			GST_WARNING("T2: Backlog  %u, %u\n",currentBytes,currentTime) ;
@@ -468,7 +480,7 @@ int main( int argc, char** argv )
 			g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"tpoint"),
 					"last-message", &lmsg, NULL) ;
 			GST_WARNING("Tpoint: Last message %s\n",lmsg) ;
-			ctr = 0;
+			ctr = 35;
 		}
 			
 		if (newstate >= GST_STATE_READY) {

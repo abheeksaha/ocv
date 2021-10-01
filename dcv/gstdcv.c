@@ -130,7 +130,9 @@ static void gst_dcv_get_property (GObject * object, guint prop_id,
 
 static gboolean gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
 static GstFlowReturn gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf);
+static GstFlowReturn gst_dcv_chain_list_video (GstPad * pad, GstObject * parent, GstBufferList * buf);
 static GstFlowReturn gst_dcv_chain_gst (GstPad * pad, GstObject * parent, GstBuffer * buf);
+static GstFlowReturn gst_dcv_chain_list_gst (GstPad * pad, GstObject * parent, GstBufferList * buf);
 extern int dcvGstDebug ;
 
 /* GObject vmethod implementations */
@@ -237,6 +239,7 @@ gst_dcv_init (Gstdcv * filter)
   filter->video_in = gst_pad_new_from_static_template (&video_sink_factory, "video_sink");
   gst_pad_set_event_function (filter->video_in, GST_DEBUG_FUNCPTR(gst_dcv_sink_event));
   gst_pad_set_chain_function (filter->video_in, GST_DEBUG_FUNCPTR(gst_dcv_chain_video));
+  gst_pad_set_chain_list_function (filter->video_in, GST_DEBUG_FUNCPTR(gst_dcv_chain_list_video));
   gst_pad_set_query_function_full (filter->video_in, gstQueryFunc,NULL,NULL) ;
 // GST_PAD_SET_PROXY_CAPS (filter->video_in);
   gst_element_add_pad (GST_ELEMENT (filter), filter->video_in);
@@ -244,6 +247,7 @@ gst_dcv_init (Gstdcv * filter)
   filter->rtp_in = gst_pad_new_from_static_template (&rtp_sink_factory, "rtp_sink");
   gst_pad_set_event_function (filter->rtp_in, GST_DEBUG_FUNCPTR(gst_dcv_sink_event));
   gst_pad_set_chain_function (filter->rtp_in, GST_DEBUG_FUNCPTR(gst_dcv_chain_gst));
+  gst_pad_set_chain_list_function (filter->rtp_in, GST_DEBUG_FUNCPTR(gst_dcv_chain_list_gst));
   gst_pad_set_query_function_full (filter->rtp_in, gstQueryFunc,NULL,NULL) ;
 //  GST_PAD_SET_PROXY_CAPS (filter->rtp_in);
   gst_element_add_pad (GST_ELEMENT (filter), filter->rtp_in);
@@ -354,7 +358,10 @@ GRCVR_PROCESS:
 			{
 				GST_LOG_OBJECT(GST_OBJECT(filter),"Transmitting video frame\n") ;
 				if (dcvGstDebug) g_print("Transmitting video frame\n") ;
-				gst_pad_push(filter->video_out,newVideoFrame) ;
+				if (gst_pad_push(filter->video_out,newVideoFrame) != GST_FLOW_OK) {
+					GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push video frame\n") ;
+				}
+					
 			}
 			Dv->num_frames++ ;
 			if (dcvGstDebug)
@@ -368,9 +375,13 @@ GRCVR_PROCESS:
 
 			if (grcvrMode == GRCVR_INTERMEDIATE || grcvrMode == GRCVR_FIRST) 
 			{
-				newDataFrame = gst_buffer_copy(dataFrameWaiting) ;
+				//newDataFrame = gst_buffer_copy(dataFrameWaiting) ;
 				if (gst_pad_is_linked(filter->rtp_out)) {
 					ret = gst_pad_push(filter->rtp_out,newDataFrame) ;
+					if (ret != GST_FLOW_OK) {
+						GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push data frame\n") ;
+					}
+	
 				}
 				if (dcvGstDebug) g_print("Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
 						ret,++(filter->vbufsnt), g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
@@ -405,7 +416,8 @@ GRCVR_PROCESS:
 
 			gst_buffer_unref(GST_BUFFER_CAST(videoFrameWaiting));
 			gst_caps_unref(vcaps);
-			gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
+			if (dataFrameWaiting != NULL)
+				gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
 		}
 		/** Clean up the video frame queue **/
 		g_print("\n") ;
@@ -494,6 +506,22 @@ gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
  * this function does the actual processing
  */
 static GstFlowReturn
+gst_dcv_chain_list_video(GstPad *pad, GstObject *parent, GstBufferList *buf)
+{
+	guint i,numBuffers = gst_buffer_list_length(buf) ;
+	GstFlowReturn rv = GST_FLOW_OK ;
+	g_print ("DCV Video buffer list received: %d buffers\n",numBuffers) ;
+	for (i=0; i<numBuffers;i++) {
+		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
+		rv = gst_dcv_chain_video(pad,parent,nb) ;
+		g_assert (rv != GST_FLOW_OK) ;
+	} 
+	if (rv == GST_FLOW_OK) 
+		gst_buffer_list_unref(buf) ;
+	return rv;
+}
+
+static GstFlowReturn
 gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
   Gstdcv *filter = GST_DCV(parent);
@@ -518,6 +546,22 @@ gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf)
   } else {
 	  return GST_FLOW_ERROR;
   }
+}
+
+static GstFlowReturn
+gst_dcv_chain_list_gst(GstPad *pad, GstObject *parent, GstBufferList *buf)
+{
+	guint i,numBuffers = gst_buffer_list_length(buf) ;
+	GstFlowReturn rv = GST_FLOW_OK ;
+	g_print ("DCV Gst buffer list received: %d buffers\n",numBuffers) ;
+	for (i=0; i<numBuffers;i++) {
+		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
+		rv = gst_dcv_chain_gst(pad,parent,nb) ;
+		g_assert (rv != GST_FLOW_OK) ;
+	} 
+	if (rv == GST_FLOW_OK) 
+		gst_buffer_list_unref(buf) ;
+	return rv;
 }
 
 static GstFlowReturn
