@@ -23,14 +23,17 @@ all: gdyn grcvr gsproc dcv.so dcvrtpmux.so
 
 test: client server
 
+client: client.o tcptrans.o
+	$(LD) -o $@ client.o tcptrans.o 
+
+server: server.o tcptrans.o
+	$(LD) -o $@ server.o tcptrans.o
+
 gdyn: gdyn.o gsftc.o gutils.o dsopencv.o $(DEPFILES)
 	$(LDCPP) -o $@ gdyn.o gsftc.o gutils.o dsopencv.o  $(LDFLAGS) -lopencv_world -lm
 
 grcvr : grcvr.o gutils.o gsftc.o dsopencv.o $(DEPFILES)
 	$(LDCPP) -o $@ grcvr.o gutils.o gsftc.o dsopencv.o $(LDFLAGS) -lopencv_world  -lm
-
-server: server.o
-	$(LD) -o $@ server.o
 
 foe: foeTest.o foe.o
 	$(LD) -o $@ foeTest.o foe.o -lgsl -lgslcblas  -lm

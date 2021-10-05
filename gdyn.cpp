@@ -570,6 +570,9 @@ int main( int argc, char** argv )
 		}
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
 	dcvFtConnClose(D.ftc) ;
+	g_print("Closing time..........") ;
+	sleep(120) ;
+	g_print(".....over\n") ;
 }
 
 

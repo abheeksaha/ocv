@@ -127,7 +127,7 @@ int main( int argc, char** argv )
 	Dv.num_frames = 0;
 	Dv.avgProcessTime = 0;
 
-	while ((ch = getopt_long(argc, argv, "r:hp:i:l",longOpts,&longindex)) != -1) {
+	while ((ch = getopt_long(argc, argv, "r:hp:i:ld:",longOpts,&longindex)) != -1) {
 		if (ch == 'r')
 		{
 			rxport = atoi(optarg) ; g_print("Setting rxport:%d\n",rxport) ; 

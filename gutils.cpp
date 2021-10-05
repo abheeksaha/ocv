@@ -414,7 +414,9 @@ gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD)
 	g_queue_push_tail(D->pD->bufq,bcnt) ;
 	gettimeofday(&D->pD->lastData,&D->pD->tz) ;
 	D->pD->entries++ ;
-	if (dcvGstDebug) g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
+	if (dcvGstDebug) 
+		g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",
+			g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
 	return true;
 }
 

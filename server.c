@@ -19,26 +19,51 @@ void help(const char *msg)
 }
 
 #define MAXBUFFERSIZE 32768
+
+int recvfunc(int sockfd, FILE *fout) 
+{ 
+	int n; 
+	char *ptr ;
+	
+	while((n=readConfirmWithTimeout(sockfd,&ptr,500)) > 0)
+	{ 
+		printf("%d bytes received\n",n) ;
+		if (fputs(ptr,fout) == EOF) {
+			fprintf(stderr,"File writing error:%s\n",strerror(errno)) ;
+			exit(1) ;
+		}
+		free(ptr) ;
+	}
+} 
 int main(int c, char **v)
 {
      int sockfd, newsockfd, portno;
      socklen_t clilen;
-     char buffer[MAXBUFFERSIZE];
      struct sockaddr_in serv_addr, cli_addr;
-     int n,bytesrcvd=0;
+     int n;
      char ch ;
      extern char *optarg ;
+	FILE *fout ;
      portno = 50018;
      
-     while ((ch = getopt(c,v,"r:h")) != -1) {
+     while ((ch = getopt(c,v,"r:o:h")) != -1) {
 	     switch(ch) {
 		     case 'h': {
-			help("server -r <port on which to listen:default 50018>\n") ;
+			help("server -r <port on which to listen:default 50018> -o <output file>\n") ;
 			exit(1) ;
 		    }
 			case 'r': portno = atoi(optarg) ; break ;
+			case 'o': {
+				printf("Using output file:%s\n",optarg) ;
+				if ((fout = fopen(optarg,"w")) == NULL) {
+					fprintf(stderr,"File open error:%s\n",strerror(errno)) ;
+					exit(1) ;
+				}
+				break ;
+			}
 	     }
      }
+	if (fout == NULL) exit(3) ;
 
      sockfd = socket(AF_INET, SOCK_STREAM, 0);
      if (sockfd < 0) 
@@ -57,28 +82,7 @@ int main(int c, char **v)
                  &clilen);
      if (newsockfd < 0) 
           help("ERROR on accept");
-     bzero(buffer,MAXBUFFERSIZE);
-     do {
-     	n = recv(newsockfd,buffer,MAXBUFFERSIZE,MSG_DONTWAIT);
-     	if (n < 0 ) {
-		if (errno == EWOULDBLOCK || errno == EAGAIN)
-			usleep(1000) ;
-		else  {
-			printf("errno = %s, unrecoverable error!\n",strerror(errno)) ;
-			break ;
-		}
-	}		
-	else if (n > 0) {
-		bytesrcvd += n ;
-		printf("Received %d total %d\n",n,bytesrcvd) ;
-	}
-	else if (n == 0) {
-		printf("Connection closed\n") ;
-	}
-
-     } while (n != 0) ;
-	printf("Received %d total %d\n",n,bytesrcvd) ;
+	recvfunc(newsockfd,fout) ;
      close(newsockfd);
      close(sockfd);
-     return 0; 
 }
