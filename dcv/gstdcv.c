@@ -495,6 +495,8 @@ gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       ret = gst_pad_event_default (pad, parent, event);
       break;
     }
+    case GST_EVENT_EOS:
+	return gst_pad_event_default(pad,parent,event) ;
     default:
       ret = gst_pad_event_default (pad, parent, event);
       break;
@@ -511,6 +513,7 @@ gst_dcv_chain_list_video(GstPad *pad, GstObject *parent, GstBufferList *buf)
 	guint i,numBuffers = gst_buffer_list_length(buf) ;
 	GstFlowReturn rv = GST_FLOW_OK ;
 	g_print ("DCV Video buffer list received: %d buffers\n",numBuffers) ;
+	GST_OBJECT_LOCK(parent) ;
 	for (i=0; i<numBuffers;i++) {
 		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
 		rv = gst_dcv_chain_video(pad,parent,nb) ;
@@ -518,6 +521,7 @@ gst_dcv_chain_list_video(GstPad *pad, GstObject *parent, GstBufferList *buf)
 	} 
 	if (rv == GST_FLOW_OK) 
 		gst_buffer_list_unref(buf) ;
+	GST_OBJECT_UNLOCK(parent) ;
 	return rv;
 }
 
@@ -525,6 +529,7 @@ static GstFlowReturn
 gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
   Gstdcv *filter = GST_DCV(parent);
+  GstFlowReturn retval ;
   dcv_bufq_loc_t ld ;
   ld.pD = &(filter->Q.videoframequeue) ;
   ld.caps = gst_pad_get_current_caps(pad) ;
@@ -542,10 +547,11 @@ gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf)
 
   if (sink_pushbufferToQueue(buf,&ld) ) {
 	  dcvProcessQueuesDcv(filter) ;
-  	return GST_FLOW_OK ;
+  	retval =  GST_FLOW_OK ;
   } else {
-	  return GST_FLOW_ERROR;
+	  retval =  GST_FLOW_ERROR;
   }
+  return retval ;
 }
 
 static GstFlowReturn
@@ -554,13 +560,14 @@ gst_dcv_chain_list_gst(GstPad *pad, GstObject *parent, GstBufferList *buf)
 	guint i,numBuffers = gst_buffer_list_length(buf) ;
 	GstFlowReturn rv = GST_FLOW_OK ;
 	g_print ("DCV Gst buffer list received: %d buffers\n",numBuffers) ;
+        GST_OBJECT_LOCK(parent) ;
 	for (i=0; i<numBuffers;i++) {
 		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
 		rv = gst_dcv_chain_gst(pad,parent,nb) ;
-		g_assert (rv != GST_FLOW_OK) ;
 	} 
 	if (rv == GST_FLOW_OK) 
 		gst_buffer_list_unref(buf) ;
+        GST_OBJECT_UNLOCK(parent) ;
 	return rv;
 }
 
@@ -569,6 +576,7 @@ gst_dcv_chain_gst (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
   Gstdcv *filter = GST_DCV(parent);
   dcv_bufq_loc_t ld ;
+  GstFlowReturn retval;
   ld.pD = &filter->Q.olddataqueue ;
   ld.caps = gst_pad_get_current_caps(pad) ;
 
@@ -583,10 +591,11 @@ gst_dcv_chain_gst (GstPad * pad, GstObject * parent, GstBuffer * buf)
 
   if (sink_pushbufferToQueue(buf,&ld) ) {
 	  dcvProcessQueuesDcv(filter) ;
-  	return GST_FLOW_OK ;
+  	retval= GST_FLOW_OK ;
   } else {
-	  return GST_FLOW_ERROR;
+	  retval= GST_FLOW_ERROR;
   }
+	return retval;
 }
 
 /* entry point to initialize the plug-in

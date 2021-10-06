@@ -339,7 +339,7 @@ gst_dcvrtpmux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 		dowaitforflush() ;
 	}
 	
-#if 1
+#if 0
 	for (i=0; i<filter->nsinks ; i++)
 	{
 		dcvrtpmux_bufq_loc_t *ld = &(filter->padq[i]) ;
@@ -351,6 +351,10 @@ gst_dcvrtpmux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 	if (empty) ret = gst_pad_event_default(pad, parent,event) ;
 	else ret = true ;
 #endif
+	if (strncmp(gst_pad_get_name(pad),"sink_0",6) == 0)
+		ret = true ;
+	else
+		ret = gst_pad_event_default(pad,parent,event) ;
 	break ;
     }
     default:
@@ -429,22 +433,40 @@ gboolean dcvrtpmux_CanSendEos(GstDcvRtpMux_t *filter)
 	else return true;
 }
 
-static GstFlowReturn gst_dcvrtpmux_chain_rtpbufferlist (GstPad * pad, GstObject * parent, GstBufferList * buf)
+static GstFlowReturn gst_dcvrtpmux_chain_rtpbufferlist (GstPad * pad, GstObject * parent, GstBufferList * buflist)
 {
-	guint i,numBuffers = gst_buffer_list_length(buf) ;
+	guint i,numBuffers ;
+	GstDcvRtpMux_t *filter = GST_DCVRTPMUX(parent) ;
+  	dcvrtpmux_bufq_loc_t * ld ;
+  	ld = getQueue(parent,pad) ;
+	if (!GST_IS_BUFFER_LIST(buflist)) {
+		g_print("Why am I not getting a buffer list\n") ;
+	}
+	numBuffers = gst_buffer_list_length(buflist) ;
 	GstFlowReturn rv = GST_FLOW_OK ;
+	GST_OBJECT_LOCK(filter) ;
 	GST_FIXME_OBJECT (parent, "DCV RTP MUX Video buffer list received: %d buffers\n",numBuffers) ;
 	g_print ("DCV RTP MUX Video buffer list received: %d buffers\n",numBuffers) ;
+  	buflist = gst_buffer_list_make_writable (buflist);
+	GstBuffer * freshbuf = gst_buffer_new() ;
 	for (i=0; i<numBuffers;i++) {
-		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
-		rv = gst_dcvrtpmux_chain_rtpbuffer(pad,parent,nb) ;
-		if (rv != GST_FLOW_OK) {
-			g_print("rtpbuffer chain function returns %d\n",rv) ;
-			g_assert(rv != GST_FLOW_OK) ;
-		}
+		GstBuffer *nb = gst_buffer_list_get(buflist,i) ;
+		nb = gst_buffer_ref(nb) ;
+  		g_queue_push_tail(ld->pD.bufq,nb)  ;
+	//	gst_buffer_append(freshbuf,nb) ;
+		
+  		filter->dcvrtpmux_nf++ ;
+  		if (rv == GST_FLOW_OK) 
+			rv = dcvrtpmux_ProcessQueues(filter) ;
 	} 
-	if (rv == GST_FLOW_OK) 
-		gst_buffer_list_unref(buf) ;
+	if (dcvrtpmux_CanSendEos(filter)) {
+#if 0
+		GstEvent *event = gst_event_new_eos() ;
+		retval = gst_pad_push_event(filter->srcpad,event) ;
+#endif
+		GST_WARNING_OBJECT(parent,"Conditions achieved for sending eos\n") ;
+	}
+	GST_OBJECT_UNLOCK(filter) ;
 	return rv;
 }
 static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * parent, GstBuffer * buf)
@@ -455,6 +477,7 @@ static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * pa
   ld = getQueue(parent,pad) ;
   ld->caps = gst_pad_get_current_caps(pad) ;
 
+  GST_OBJECT_LOCK(filter) ;
   if (filter->silent == FALSE)
   {
     if (filter->dcvrtpmux_nf == 0)
@@ -472,13 +495,10 @@ static GstFlowReturn gst_dcvrtpmux_chain_rtpbuffer (GstPad * pad, GstObject * pa
 		retval = gst_pad_push_event(filter->srcpad,event) ;
 #endif
 		GST_WARNING_OBJECT(parent,"Conditions achieved for sending eos\n") ;
-		return retval ;
 	}
-	else
-		return retval ;
   }
-  else
-	return retval ;
+  GST_OBJECT_UNLOCK(filter) ;
+  return retval ;
 }
 
 

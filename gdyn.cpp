@@ -80,7 +80,7 @@ volatile gboolean sigrcvd = FALSE ;
 
 static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
 	dcv name=dcvSender \
-	rtpmux name=mux ! queue name=usq ! appsink name=usink \
+	dcvrtpmux name=mux ! queue name=usq ! appsink name=usink \
 	tpoint.src_0 ! queue name=ddq ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
 	tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=vsq ! mux.sink_0 \
 	dcvSender.video_src ! video/x-raw,format=BGR ! %s \
@@ -571,7 +571,7 @@ int main( int argc, char** argv )
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
 	dcvFtConnClose(D.ftc) ;
 	g_print("Closing time..........") ;
-	sleep(120) ;
+	sleep(20) ;
 	g_print(".....over\n") ;
 }
 
