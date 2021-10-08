@@ -4,7 +4,9 @@
 #include <string.h> 
 #include <unistd.h>
 #include <sys/socket.h> 
-#define MAX 8000
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#define MAX 90000
 #define PORT 50018 
 #define SA struct sockaddr 
 #include <getopt.h>
@@ -12,16 +14,16 @@ extern char *optarg ;
 #include <errno.h>
 extern int errno ;
 
-void func(int sockfd, FILE *fin) 
+#include "tcptrans.h"
+void func(int sockfd, FILE *fin, int maxsize) 
 { 
 	char buff[MAX]; 
 	int n,hdrsize; 
-	char *hdr;
 	
-	while( (hdr = fgets(buff,MAX,fin)) != NULL)
+	if (maxsize > MAX) maxsize = MAX ;
+	while( (hdrsize = fread(buff,sizeof(char),maxsize,fin)) != NULL)
 	{ 
-		int mlen = strlen(hdr) ;
-		if ( (n=writeConfirmWithTimeout(sockfd,buff,mlen,500)) < 0) break ;
+		if ( (n=writeConfirmWithTimeout(sockfd,buff,hdrsize,500)) < 0) break ;
 		printf("%d bytes sent\n",n) ;
 	}
 }
@@ -75,7 +77,7 @@ int main(int c, char **v)
 		printf("connected to the server..\n"); 
 
 	// function for chat 
-	func(sockfd,fin); 
+	func(sockfd,fin,51200); 
 
 	// close the socket 
 	close(sockfd); 

@@ -80,7 +80,7 @@ volatile gboolean sigrcvd = FALSE ;
 
 static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
 	dcv name=dcvSender \
-	dcvrtpmux name=mux ! queue name=usq ! appsink name=usink \
+	dcvrtpmux name=mux ! queue name=usq ! r3psink name=usink timeout=500\
 	tpoint.src_0 ! queue name=ddq ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
 	tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=vsq ! mux.sink_0 \
 	dcvSender.video_src ! video/x-raw,format=BGR ! %s \
@@ -321,7 +321,7 @@ int main( int argc, char** argv )
 			g_print("Something went wrong in initialization\n") ;
 			exit(3) ;
 		}
-		dcvConfigAppSink(GST_APP_SINK_CAST(D.usink),dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, &D.eos[EOS_USINK]) ; 
+//		dcvConfigAppSink(GST_APP_SINK_CAST(D.usink),dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, &D.eos[EOS_USINK]) ; 
 	}
 	{
 		g_object_set(G_OBJECT(D.tpt), "pull-mode", GST_TEE_PULL_MODE_SINGLE, NULL) ;
@@ -485,45 +485,6 @@ int main( int argc, char** argv )
 			
 		if (newstate >= GST_STATE_READY) {
 #if 0
-			while (D.dsrcstate.state == G_WAITING && !g_queue_is_empty(D.dq.bufq)){
-				dcv_BufContainer_t *dv ;
-				ctr = 0 ;
-				dv = (dcv_BufContainer_t *)g_queue_pop_head(D.dq.bufq) ;
-				GstCaps *vcaps ;
-				v = GST_BUFFER_CAST(dv->nb) ;
-				vcaps = dv->caps;
-				GstBuffer * newVideoFrame ;
-				GstBuffer * databuf ;
-				notprocessed = 0 ;
-				if (v!=NULL) {
-					databuf = dcvProcessStage(v,vcaps,NULL,&Dv,stage1,&newVideoFrame) ;
-
-// Add a message dat	
-					if ( dotx && (databuf != NULL) )
-					{
-						if (GST_IS_BUFFER(databuf))
-						{
-						GstFlowReturn ret = gst_app_src_push_buffer(D.dsrc,databuf) ;
-						g_print("Pushing data buffer number %d...(ret=%d)...remaining(%u) status:dsrc=%d usink=%d vdisp=%d vsink=%d\n", 
-								++numDataFrames, ret,g_queue_get_length(D.dq.bufq),D.eos[EOS_DSRC], D.eos[EOS_USINK], D.eos[EOS_VDISP], D.eos[EOS_VSINK]) ;
-						g_print("Bytes sent:%d\n", D.ftc->sentbytes) ;
-						}
-						else {
-							g_print ("Whoa!! This is not a valid buffer!\n") ;
-							gst_buffer_unref(databuf) ;
-						}
-					}
-					dcvBufContainerFree(dv) ;
-					free(dv) ;
-					if (localdisplay) dcvLocalDisplay(newVideoFrame,vcaps,D.vdisp,++Dv.num_frames) ;
-					else Dv.num_frames++ ;
-					if (Dv.num_frames == 1 && graphdump == true) {
-						g_print("Dumping bin to file %s\n",graphfile) ;
-						GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(D.pipeline), GST_DEBUG_GRAPH_SHOW_MEDIA_TYPE,graphfile) ;
-					}
-
-				}
-			}
 #endif
 			if (++notprocessed == 5) {
 				if (dcvGstDebug & 0x02 == 0x02) g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;

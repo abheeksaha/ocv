@@ -21,9 +21,21 @@ VPATH = .:../
 
 all: dcv.so dcvrtpmux.so
 DCVDEPFILES = gstdcv.o dcvutils.o dsopencv.o
+DCVR3PDEPFILES = gstr3p.o gstr3psink.o gstr3psrc.o tcptrans.o
+
 dcv.so: $(DCVDEPFILES)
 	$(CPP) --shared -o dcv.so $(DCVDEPFILES) -lopencv_world -lm
 
 dcvrtpmux.so: gstdcvrtpmux.o
 	$(CPP) --shared -o dcvrtpmux.so gstdcvrtpmux.o -lgstrtp-1.0
 
+gstr3p.so: $(DCVR3PDEPFILES)
+	$(CPP) --shared -o gstr3p.so $(DCVR3PDEPFILES) -lgstreamer-1.0 -lgstbase-1.0 -lgstapp-1.0 -lgobject-2.0 -lglib-2.0 -lgio-2.0  -lm
+
+test: client server
+
+client: client.o tcptrans.o
+	$(LD) -o $@ client.o tcptrans.o 
+
+server: server.o tcptrans.o
+	$(LD) -o $@ server.o tcptrans.o

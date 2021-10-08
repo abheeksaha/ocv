@@ -9,10 +9,10 @@ extern int errno ;
 #include "tcptrans.h"
 
 
-int getMsgWithTimeout(int sockfd, char * hdr, int hdrsize, int toutmsec)
+int getMsgWithTimeout(int sockfd, char * hdr, int hdrsize, int toutmsec, int waitformore)
 {
 	struct timeval tv ;
-	int bytes ;
+	int bytes = 0;
 	tv.tv_sec = toutmsec/1000 ;
 	tv.tv_usec = (toutmsec*1000)%1000000 ;
 	if (tv.tv_sec > 0 || tv.tv_usec > 0) {
@@ -22,14 +22,24 @@ int getMsgWithTimeout(int sockfd, char * hdr, int hdrsize, int toutmsec)
 		}
 	}
 	bzero(hdr,hdrsize) ;
-	bytes = read (sockfd, hdr, hdrsize) ;
-	if (bytes == 0) {
-		printf("Timeout\n") ;
-		return 0 ;
-	}
-	else if (bytes  < 0) {
-		fprintf(stderr,"Couldn't write to socket:%s\n",strerror(errno)) ;
-		return -1 ;
+	while (hdrsize  > 0) {
+		int bytesread = recv (sockfd, hdr, hdrsize,0) ;
+		if (bytesread == 0) {
+			if (bytes == 0) {
+				printf("Timeout\n") ;
+			}
+			return bytes ;
+		}
+		else if (bytesread  < 0) {
+			fprintf(stderr,"Couldn't read from socket (hdrsize=%d):%s\n",hdrsize,strerror(errno)) ;
+			return -1 ;
+		}
+		else if (waitformore) {
+			hdrsize -= bytesread ;
+			hdr += bytesread ;
+		}
+		bytes += bytesread ;
+		if (!waitformore) break ;
 	}
 	return bytes ;
 }
@@ -37,31 +47,37 @@ int getMsgWithTimeout(int sockfd, char * hdr, int hdrsize, int toutmsec)
 int writeConfirmWithTimeout(int sockfd, char *msg, int mlen, int toutmsec)
 {
 	char hdr[2048] ;
+	int bytes = 0;
 	int hdrsize = sprintf(hdr,"Receive msg of size %d\n", mlen) ;
-	if (write(sockfd, hdr,hdrsize) < hdrsize) {
-		fprintf(stderr,"Couldn't write on socket:%s\n",strerror(errno)) ;
+	if (send(sockfd, hdr,hdrsize,0) < hdrsize) {
+		fprintf(stderr,"Couldn't write to socket: (hdrsize=%d) %s\n",hdrsize,strerror(errno)) ;
 		return -1 ;
 	}
 	do {
-		hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500) ;
+		hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500,0) ;
 	} while (hdrsize == 0) ;
 	if (hdrsize == -1) return -1 ;
 
 	if (!strncmp(hdr,"OK",2)) {
-		if (write(sockfd, msg, mlen) < mlen) {
-			fprintf(stderr,"Couldn't write actual msg:%s\n",strerror(errno)) ;
-			return -1 ;
+		while (mlen > 0) {
+			int byteswritten ;
+			if ((byteswritten = send(sockfd, msg, mlen,0)) <= 0) {
+				fprintf(stderr,"Couldn't write actual msg:%s\n",strerror(errno)) ;
+				return -1 ;
+			}
+//			printf("Written %d bytes to server\n",bytes) ;
+			bytes += byteswritten ;
+			mlen -= byteswritten ;
+			msg += byteswritten ;
 		}
-		printf("Written %d bytes to server\n",mlen) ;
-	
-		hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500) ;
+		hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500,0) ;
 		
 		if (!strncmp(hdr,"Exit",4)) {
 			printf("Server initiated Exit...cannot transmit data\n"); 
 			return -2; 
 		}
 		else if (!strncmp(hdr,"OK",2)) {
-			return mlen ;
+			return bytes ;
 		}
 		else
 			return -1 ;
@@ -74,21 +90,22 @@ int readConfirmWithTimeout(int sockfd, char **msg, int toutmsec)
 {
 	int tlen,mlen,nread ;
 	char hdr[2048] ;
-	int hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500) ;
+	int hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500,0) ;
 	if (hdrsize <= 0) return hdrsize ;
 
 	if ( (nread = sscanf(hdr,"Receive msg of size %d\n",&tlen)) >= 1){ 
-		*msg = calloc(tlen+1,sizeof(char)) ;
+		printf("Preparing to receive message of size %d\n",tlen) ;
+		*msg = calloc(tlen,sizeof(char)) ;
 		if (*msg == NULL) {
 			return -1 ;
 		}
-		bzero(*msg,tlen+1) ;
+		bzero(*msg,tlen) ;
 
 		if (send(sockfd,"OK",2,0) < 0) {
 			fprintf(stderr,"Couldn't send ok message\n") ;
 			return -1 ;
 		}
-		if ((mlen = getMsgWithTimeout(sockfd,*msg,tlen+1,500)) != tlen) {
+		if ((mlen = getMsgWithTimeout(sockfd,*msg,tlen,500,1)) != tlen) {
 			return -1 ;
 		}
 		printf("Received %d bytes from client\n",mlen) ;

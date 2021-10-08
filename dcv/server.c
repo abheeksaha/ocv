@@ -7,10 +7,13 @@
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+
+#include "tcptrans.h"
 
 void help(const char *msg)
 {
@@ -22,16 +25,17 @@ void help(const char *msg)
 
 int recvfunc(int sockfd, FILE *fout) 
 { 
-	int n; 
+	int n,hdr; 
 	char *ptr ;
 	
 	while((n=readConfirmWithTimeout(sockfd,&ptr,500)) > 0)
 	{ 
 		printf("%d bytes received\n",n) ;
-		if (fputs(ptr,fout) == EOF) {
+		if ( (hdr=fwrite(ptr,sizeof(char), n, fout)) < 0 ) {
 			fprintf(stderr,"File writing error:%s\n",strerror(errno)) ;
 			exit(1) ;
 		}
+		printf("Written %d bytes to output file\n",hdr) ;
 		free(ptr) ;
 	}
 } 
