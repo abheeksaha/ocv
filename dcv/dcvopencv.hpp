@@ -10,6 +10,8 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 
+#include "dsopencv.hpp"
+
 
 namespace cv {
 gboolean retrieveFrame(GstBuffer * buf, GstCaps * caps, cv::Mat * img,dcvFrameData_t *df) ;

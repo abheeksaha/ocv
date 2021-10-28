@@ -1,33 +1,32 @@
-#include <netdb.h> 
 #include <stdio.h> 
 #include <stdlib.h> 
+#include <netdb.h> 
 #include <string.h> 
+#include <unistd.h>
 #include <sys/socket.h> 
-#define MAX 80 
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#define MAX 90000
 #define PORT 50018 
 #define SA struct sockaddr 
 #include <getopt.h>
 extern char *optarg ;
-void func(int sockfd) 
+#include <errno.h>
+extern int errno ;
+
+#include "tcptrans.h"
+void func(int sockfd, FILE *fin, int maxsize) 
 { 
 	char buff[MAX]; 
-	int n; 
-	for (;;) { 
-		bzero(buff, sizeof(buff)); 
-		printf("Enter the string : "); 
-		n = 0; 
-		while ((buff[n++] = getchar()) != '\n') 
-			; 
-		write(sockfd, buff, sizeof(buff)); 
-		bzero(buff, sizeof(buff)); 
-		read(sockfd, buff, sizeof(buff)); 
-		printf("From Server : %s", buff); 
-		if ((strncmp(buff, "exit", 4)) == 0) { 
-			printf("Client Exit...\n"); 
-			break; 
-		} 
-	} 
-} 
+	int n,hdrsize; 
+	
+	if (maxsize > MAX) maxsize = MAX ;
+	while( (hdrsize = fread(buff,sizeof(char),maxsize,fin)) != NULL)
+	{ 
+		if ( (n=writeConfirmWithTimeout(sockfd,buff,hdrsize,500)) < 0) break ;
+		printf("%d bytes sent\n",n) ;
+	}
+}
 
 int main(int c, char **v) 
 { 
@@ -35,13 +34,24 @@ int main(int c, char **v)
 	struct sockaddr_in servaddr, cli; 
 	char ch ;
 	int port = PORT ;
-	while ((ch = getopt(c,v,"p:")) != -1) {
+	FILE *fin = NULL ;
+	while ((ch = getopt(c,v,"p:f:")) != -1) {
 		switch(ch) {
 			case 'p': port = atoi(optarg) ; break ;
+			case 'f': {
+				printf("Using input file:%s\n",optarg) ;
+				if ((fin = fopen(optarg,"r")) == NULL) {
+					fprintf(stderr,"File open error:%s\n",strerror(errno)) ;
+					exit(1) ;
+				}
+				break ;
+			}
 		}
 	}
 	printf("Using port=%d\n",port) ;
-
+	if (fin == NULL) {
+		exit(3) ;
+	}
 
 	// socket create and varification 
 	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
@@ -55,7 +65,7 @@ int main(int c, char **v)
 
 	// assign IP, PORT 
 	servaddr.sin_family = AF_INET; 
-	servaddr.sin_addr.s_addr = inet_addr("192.168.1.71"); 
+	servaddr.sin_addr.s_addr = inet_addr("192.168.16.205"); 
 	servaddr.sin_port = htons(port); 
 
 	// connect the client socket to server socket 
@@ -67,7 +77,7 @@ int main(int c, char **v)
 		printf("connected to the server..\n"); 
 
 	// function for chat 
-	func(sockfd); 
+	func(sockfd,fin,51200); 
 
 	// close the socket 
 	close(sockfd); 

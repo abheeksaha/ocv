@@ -5,7 +5,8 @@
 #include <gst/gst.h>
 #include <gst/gstbin.h>
 #include <gst/app/app.h>
-#include "rseq.hpp"
+#include <gst/gstdebugutils.h>
+#include "rseq.h"
 #include "gutils.hpp"
 
 
@@ -45,24 +46,36 @@ gboolean listenToBus(GstElement *pipeline, GstState * nstate, GstState *ostate, 
           terminate = TRUE;
           break;
         case GST_MESSAGE_STATE_CHANGED:
+	{
           /* We are only interested in state-changed messages from the pipeline */
 	  GstElement *msgsrc = GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)) ;
-          if (GST_MESSAGE_SRC (msg) == GST_OBJECT (pipeline)) 
+          if (msgsrc == GST_ELEMENT_CAST (pipeline)) 
 	  {
             GstState pending_state;
+		gchar dumpmsg[1024] ;
             gst_message_parse_state_changed (msg, ostate, nstate, &pending_state);
             g_print ("Element %s state changed from %s to %s:\n",
 			    GST_ELEMENT_NAME(msgsrc),
                 gst_element_state_get_name (*ostate), gst_element_state_get_name (*nstate));
+		sprintf(dumpmsg,"%s_graph",gst_element_get_name(GST_ELEMENT_CAST(pipeline))) ;
+		GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS(GST_BIN(pipeline),GST_DEBUG_GRAPH_SHOW_ALL,dumpmsg) ;
           }
+	  else {
+		//g_print("Gst message source is not pipeline:%s\n",GST_ELEMENT_NAME(msgsrc)) ;
+	  }
           break;
+	}
 	case GST_MESSAGE_QOS:
-	  g_print("Received a QoS message from : %s", GST_ELEMENT_NAME(GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)))) ; 
+	{
+	  g_print("Received a QoS message from : %s\n", GST_ELEMENT_NAME(GST_ELEMENT_CAST(GST_MESSAGE_SRC(msg)))) ; 
 	  break ;
+	}
         default:
+	{
           /* We should not reach here */
           g_printerr ("Unexpected message received.\n");
           break;
+	}
       }
       gst_message_unref (msg);
     }
@@ -142,6 +155,8 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 	static int count=0;
 	struct timeval Tv;
 	struct timezone tz;
+	static char opstr[1023] ;
+	static char *pop = opstr ;
 	u32 *pA = (u32 *)A ;
 	tag_t *pd = (tag_t *)B ;
 	pd->count = count++ ;
@@ -152,7 +167,7 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 		pd->seq[i] = rseq[i] ;
 	pd->checksum=0;
 	/* Now write the checksum at the end */
-	g_print("Tag:count=%u tstmp=%u Sequence of size %u ", pd->count,pd->tstmp, RSEQSIZE) ;
+	pop += sprintf(pop,"Tag:count=%u tstmp=%u Sequence of size %u ", pd->count,pd->tstmp, RSEQSIZE) ;
 	for (i=0; i<RSEQSIZE; i++)
 	{
 		if (rseq[i] >= isz/sizeof(u32)) {
@@ -160,10 +175,11 @@ void dcvTagBuffer(void *A, int isz, void *B, int osz)
 				rseq[i], isz) ;
 			g_assert(rseq[i] < (isz/sizeof(u32))) ;
 		}
-		g_print("pA[%u]=%u ",rseq[i],pA[rseq[i]]) ;
+		pop += sprintf(pop,"pA[%u]=%u ",rseq[i],pA[rseq[i]]) ;
 		pd->checksum ^= pA[rseq[i]] ;
 	}
-	g_print("Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
+	pop += sprintf(pop,"Final hash for sequence size %u is %u\n",RSEQSIZE, pd->checksum) ;
+	//g_print("%s\n",opstr) ;
 }
 
 gint dcvTimeDiff(struct timeval t1, struct timeval t2)
@@ -313,10 +329,10 @@ GstFlowReturn sink_newpreroll(GstAppSink *slf, gpointer d)
 		return GST_FLOW_ERROR;
 }
 
-typedef struct {
-	dcv_bufq_t *pD ;
-	GstCaps * caps ;
-} dcv_bufq_loc_t  ;
+//typedef struct {
+//	dcv_bufq_t *pD ;
+//	GstCaps * caps ;
+//} dcv_bufq_loc_t  ;
 
 GstFlowReturn sink_trypullsample(GstAppSink *slf, dcv_bufq_t *d)
 {
@@ -398,7 +414,9 @@ gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD)
 	g_queue_push_tail(D->pD->bufq,bcnt) ;
 	gettimeofday(&D->pD->lastData,&D->pD->tz) ;
 	D->pD->entries++ ;
-	if (dcvGstDebug) g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
+	if (dcvGstDebug) 
+		g_print("Added buffer number %d [size=%d] to queue [Total=%d]\n",
+			g_queue_get_length(D->pD->bufq),gst_buffer_get_size(gb),D->pD->entries) ;
 	return true;
 }
 

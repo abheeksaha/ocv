@@ -4,6 +4,7 @@
 #include <sys/time.h>
 #define validstate(k) ((k>=0) && (k<=4))
 
+#include "gstdcv.h"
 typedef enum {
 	EOS_VSINK,
 	EOS_DSINK,
@@ -13,6 +14,8 @@ typedef enum {
 	EOS_DSRC,
 	MAX_EOS_TYPES
 } eos_e ;
+GST_DEBUG_CATEGORY_STATIC (my_category);
+#define GST_CAT_DEFAULT my_category
 
 
 typedef enum {
@@ -25,29 +28,6 @@ typedef struct {
 	int length ;
 	gboolean finished ;
 }srcstate_t ;
-
-#if 1
-typedef struct {
-	GQueue *bufq;
-	struct timeval lastData;
-	struct timezone tz;
-	int entries ;
-} dcv_bufq_t ;
-
-typedef struct {
-	dcv_bufq_t *pD ;
-	GstCaps * caps ;
-} dcv_bufq_loc_t  ;
-
-
-typedef struct {
-	GstBuffer *nb;
-	GstCaps *caps;
-	struct timeval ctime;
-	struct timezone ctz;
-} dcv_BufContainer_t ;
-#endif
-
 
 int dcvBufQInit(dcv_bufq_t *P) ;
 
@@ -62,6 +42,7 @@ typedef void (*src_eos_fn_t)(GstAppSrc *, gpointer) ;
 gboolean dcvConfigAppSink(GstAppSink *vsink,sink_sample_fn_t sink_ns, void *d_samp, sink_preroll_fn_t sink_pre, void *d_pre, sink_eos_fn_t eosRcvd, void *d_eos)  ;
 gboolean dcvConfigAppSrc(GstAppSrc *dsrc, src_dfw_fn_t src_dfw, void *dfw, src_dfs_fn_t src_dfs, void *dfs, src_eos_fn_t eosRcvd, void *d_eos , GstCaps *caps) ;
 void dcvAppSrcStatus(GstAppSrc *s, srcstate_t *st) ;
+gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD) ;
 
 /** Buffer Functions **/
 void dcvTagBuffer(void *A, int isz, void *B, int osz) ;
@@ -101,6 +82,5 @@ void bufferCounterInit(bufferCounter_t *i, bufferCounter_t *o) ;
 void bufferCounterDump(int signalnum) ;
 
 int dcvLocalDisplay(GstBuffer *gb, GstCaps *vcaps, GstAppSrc *vdisp, int num_frames) ;
-
-int donothing(void *);
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb) ;
 #endif

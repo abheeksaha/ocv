@@ -1,6 +1,6 @@
 /**********************************************************************
  * Simple framing protocol over TCP for RTP packets.
- * Trying to solve the corruptionn problem
+ * Trying to solve the corruption problem
  *
  * *******************************************************************/
 #include <stdio.h>
@@ -117,9 +117,11 @@ gboolean dcvFtConnStart(dcv_ftc_t *D)
 
 void dcvFtConnClose(dcv_ftc_t *D)
 {
+#if 0
 	if (D->outsock != -1) close(D->outsock) ;
 	if (D->insock != -1) close(D->insock) ;
 	if (D->servsock != -1) close(D->servsock) ;
+#endif
 	g_print("Conn close: sent=%d\n",D->sentbytes) ;
 }
 
