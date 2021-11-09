@@ -108,6 +108,7 @@ struct _Gstdcv
   GstPad *video_out, *rtp_out;
 
   gboolean silent;
+  gboolean eosFwd ;
   gpointer execFn;
   gint     grcvrMode ;
   gint     vfmatch ;

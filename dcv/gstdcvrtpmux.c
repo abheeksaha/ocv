@@ -156,7 +156,8 @@ gst_dcvrtpmux_class_init (GstdcvrtpmuxClass * klass)
 static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 {
   	Gstdcvrtpmux *gdcvrtpmux = GST_DCVRTPMUX (parent);
-	GST_LOG_OBJECT (parent,"dcvrtpmuxTerminal: Received query of type %u\n", GST_QUERY_TYPE(query)) ;
+	GST_DEBUG_OBJECT (parent,"dcvrtpmuxTerminal: Received query of type %s\n", 
+		gst_query_type_get_name(GST_QUERY_TYPE(query))) ;
 	gboolean ret = TRUE ;
 	switch (GST_QUERY_TYPE(query)) {
 		case GST_QUERY_CAPS:

@@ -22,9 +22,10 @@
 GST_DEBUG_CATEGORY_STATIC (dscope_debug);
 #define GST_CAT_DEFAULT dscope_debug
 #endif
+#define DATASINK udpsink
 static void help(char *name)
 {
-	g_print("Usage: %s -f <input file, mp4 format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmisison>\n\
+	g_print("Usage: %s -f <input file, mp4 format> | -n <recv port number> -p <port num for tx: default 50018> -i <dest ip address for transmission>\n\
 		       	-l (local display) -e|--intel-edge --graphdump <graphdumpfile> \n",name) ;  
 }
 
@@ -39,7 +40,6 @@ typedef struct {
 	GstElement *tpt;
 	GstElement *vparse;
 	GstElement *mdmx;
-	GstElement *usink;
 	GstAppSink *vsink;
 	GstAppSrc  *dsrc;
 	GstAppSrc  *vdisp;
@@ -55,7 +55,6 @@ typedef struct {
 	GstElement *fsrc ;
 	unsigned long vsinkq;
 	dcv_bufq_t dq;
-	dcv_ftc_t *ftc;
 } dpipe_t ;
 
 extern int dcvFtcDebug;
@@ -80,7 +79,7 @@ volatile gboolean sigrcvd = FALSE ;
 
 static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=mdmx ! parsebin name=vparse ! tee name=tpoint \
 	dcv name=dcvSender \
-	dcvrtpmux name=mux ! queue name=usq ! r3psink name=usink timeout=500\
+	rtpmux name=mux ! queue ! r3psink name=r3ps \
 	tpoint.src_0 ! queue name=ddq ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
 	tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=vsq ! mux.sink_0 \
 	dcvSender.video_src ! video/x-raw,format=BGR ! %s \
@@ -96,10 +95,10 @@ static char ndesc[] = "rtpbin name=rbin \
 			  appsrc name=dsrc ! queue ! application/x-rtp,media=application,payload=102,encoding-name=X-GST ! rtpgstpay name=rgpy ! mux.sink_1";
 #endif
 static char ndesc[] = "rtpbin name=rbin \
-		       udpsrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
+		       r3psrc name=usrc address=192.168.1.71 port=50017 ! rbin.recv_rtp_sink_0 \
 		       rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint \
 			dcv name=dcvSender \
-			  rtpmux name=mux ! queue ! appsink  name=usink \
+			  rtpmux name=mux ! queue ! DATASINK timeout=500 \
 			  tpoint.src_0 ! queue ! parsebin ! avdec_h264 name=vsd ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvSender.video_sink \
 			  tpoint.src_1 ! queue ! parsebin ! rtph264pay name=vppy ! mux.sink_0 \
 			  dcvSender.video_src ! video/x-raw,format=BGR ! %s \
@@ -177,7 +176,7 @@ int main( int argc, char** argv )
 	grcvr_mode_e grcvrMode = GRCVR_FIRST ;
 
 	strcpy(videofile,"v1.webm") ;
-	strcpy(clientipaddr,"192.168.1.71") ;
+	strcpy(clientipaddr,"192.168.16.205") ;
 	sprintf(qarg,"") ;
 	static struct option longOpts[] = {
 		{ "help", no_argument, 0, 'h' },
@@ -315,13 +314,11 @@ int main( int argc, char** argv )
 
 	{
 		g_print("Setting destination to %s:%u\n",clientipaddr,txport) ;
-		D.usink = gst_bin_get_by_name(GST_BIN(D.pipeline),"usink") ;
-		D.ftc = dcvFtConnInit(NULL,-1,clientipaddr,txport) ;
-		if (D.ftc == NULL) {
-			g_print("Something went wrong in initialization\n") ;
-			exit(3) ;
+		GstElement *r3psink  = gst_bin_get_by_name(GST_BIN(D.pipeline),"r3ps") ;
+		if (r3psink != NULL) {
+			g_object_set(G_OBJECT(r3psink),"host",clientipaddr, NULL) ;
+			g_object_set(G_OBJECT(r3psink),"port",txport, NULL) ;
 		}
-//		dcvConfigAppSink(GST_APP_SINK_CAST(D.usink),dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,eosRcvd, &D.eos[EOS_USINK]) ; 
 	}
 	{
 		g_object_set(G_OBJECT(D.tpt), "pull-mode", GST_TEE_PULL_MODE_SINGLE, NULL) ;
@@ -348,6 +345,7 @@ int main( int argc, char** argv )
 			g_print("Rtp GST Pay wants %s caps \n", gst_caps_to_string(t)) ;
 			g_object_set(G_OBJECT(ge), "pt", 102 ,NULL) ;
 		}
+#if 0
 		if (gst_bin_get_by_name(GST_BIN(D.pipeline),"dsrc"))
 		{
 			GstElement * ge = gst_bin_get_by_name(GST_BIN(D.pipeline),"dsrc") ; g_assert(ge) ;
@@ -356,6 +354,7 @@ int main( int argc, char** argv )
 		  		"media",G_TYPE_STRING,"application","clock-rate",G_TYPE_INT,90000,"payload",G_TYPE_INT,102,"encoding-name",G_TYPE_STRING,"X-GST",NULL) ;
 			dcvConfigAppSrc(D.dsrc,dataFrameWrite,&D.dsrcstate,dataFrameStop,&D.dsrcstate,eosRcvdSrc, &D.eos[EOS_DSRC],caps) ;
 		}
+#endif
 		if (D.vsink != NULL)
 		{
 			dcvConfigAppSink(D.vsink,sink_newsample, &D.dq, sink_newpreroll, &D.dq,eosRcvd, &D.eos) ; 
@@ -381,16 +380,12 @@ int main( int argc, char** argv )
 			g_value_init(&valueMode,G_TYPE_INT) ;
 			g_value_set_int(&valueMode,grcvrMode) ;
 			g_object_set(G_OBJECT(D.dcv),"grcvrMode",GRCVR_FIRST,NULL);
+			g_object_set(G_OBJECT(D.dcv),"eosFwd",TRUE,NULL) ;
 		}
 	}
 	
 	// Now link the pads
-  	if (!rtpsink1 || !rtpsink2) { 
-		  g_print("Couldn't get request pads\n") ; 
-	}
-#if VP9PAY
-#endif
-	else if (!mqsrc) {
+	if (!mqsrc) {
 		g_print("Couldn't get static pad for message \n") ;
 	}
 	else if (gst_pad_is_linked(mqsrc)){
@@ -400,11 +395,6 @@ int main( int argc, char** argv )
 	}
 	else {
 		g_print ("mqsrc should have been linked!!!\n") ;
-	}
-
-	if (dcvFtConnStart(D.ftc) == FALSE) {
-		g_print("Something happened during connection start\n") ;
-		exit(3) ;
 	}
 
 	ret = gst_element_set_state (D.pipeline, GST_STATE_PLAYING);
@@ -428,11 +418,6 @@ int main( int argc, char** argv )
 	}
 	}
 
-	ret = gst_element_set_state(GST_ELEMENT_CAST(D.usink),GST_STATE_PLAYING) ;
-	if (ret == GST_STATE_CHANGE_FAILURE) {
-		g_print ("Unable to set usink to the playing state.\n");
-		return -1;
-	}
 	if (D.vdisp) {
 	if ( ( ret = gst_element_set_state(GST_ELEMENT_CAST(D.vdisp),GST_STATE_PLAYING)) == GST_STATE_CHANGE_FAILURE)
 	{
@@ -487,19 +472,11 @@ int main( int argc, char** argv )
 #if 0
 #endif
 			if (++notprocessed == 5) {
-				if (dcvGstDebug & 0x02 == 0x02) g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
+				if (dcvGstDebug & 0x02 == 0x02) 
+					g_print("newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
 				notprocessed = 0 ;
 			}
 
-			while (D.ftc->totalbytes > D.ftc->spaceleft) {
-				if (dcvFtcDebug) g_print("Pending data in input buffer! %d bytes\n",D.ftc->totalbytes - D.ftc->spaceleft) ;
-				if (dcvPushBuffered(GST_APP_SRC_CAST(D.fsrc),D.ftc)  <= 0) break ;
-			}
-			if (D.ftc->totalbytes > D.ftc->spaceleft) { 
-				if (dcvFtcDebug) g_print("%d bytes pending\n",(D.ftc->totalbytes - D.ftc->spaceleft)) ; 
-			}
-			else {
-			}
 		}
 			if (++notprocessed == 5) {
 				if (dcvGstDebug & 0x02 == 0x02) g_print("External:newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
@@ -508,10 +485,6 @@ int main( int argc, char** argv )
 		if  (D.eos[EOS_VSINK] == true) {
 			if (eosstage == 0)
 				g_print("Received eos on vsink.newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
-			if (dcvIsDataBuffered(D.ftc) > 0) {
-				g_print("Got pending data:%d\n", dcvBufferedBytes(D.ftc)) ;
-				if (eosstage > 0) eosstage-- ;
-			}
 			else if (eosstage < 1)
 			{
 				eosstage++ ;
@@ -530,7 +503,6 @@ int main( int argc, char** argv )
 			}
 		}
 	} while (terminate == FALSE || !g_queue_is_empty(D.dq.bufq)) ;
-	dcvFtConnClose(D.ftc) ;
 	g_print("Closing time..........") ;
 	sleep(20) ;
 	g_print(".....over\n") ;

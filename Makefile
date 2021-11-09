@@ -19,7 +19,7 @@ OLIBDIR = /home/ggne0015/src/opencv-4.1.1/build/lib
 .c.o:
 	$(CC) $(CFLAGS) -fPIC -c $*.c
 
-all: gdyn grcvr gsproc dcv.so dcvrtpmux.so dcvr3p.so
+all: gdyn grcvr gsproc dcv.so dcvrtpmux.so gstr3p.so
 
 
 gdyn: gdyn.o gsftc.o gutils.o dsopencv.o $(DEPFILES)
@@ -39,8 +39,8 @@ lkdemo: $(LKDEMOOPT)
 dcv.so: 
 	cd dcv ; make dcv.so
 
-dcvr3p.so: 
-	cd dcv ; make dcvr3p.so
+gstr3p.so: 
+	cd dcv ; make gstr3p.so
 
 dcvrtpmux.so:
 	cd dcv ; make dcvrtpmux.so
