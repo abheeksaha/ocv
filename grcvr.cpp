@@ -14,6 +14,7 @@
 #include "opencv2/highgui.hpp"
 #include "gutils.hpp"
 #include "gstdcv.h"
+#include "gpipe.h"
 #include "dsopencv.hpp"
 
 GST_DEBUG_CATEGORY_STATIC (dscope_debug);
@@ -49,12 +50,15 @@ typedef struct {
 	gboolean eosSent[MAX_EOS_TYPES];
 	/** Data holding elements **/
 	dcv_ftc_t *ftc;
+	GstElement *gstq1 ;
+	GstElement *videoq1 ;
 } dpipe_t ;
 
 #define MAX_DATA_BUF_ALLOWED 240
 
 static void eosRcvd(GstAppSink *slf, gpointer D) ;
-static void demuxpadAdded(GstElement *s, guint pt, GstPad *P, gpointer d) ;
+static GstCaps * rtpBinPtMap(GstElement *s, guint pt, gpointer d) ;
+static int rtpBinPtChanged(GstElement *s, guint session, guint pt, gpointer d) ;
 static void demuxpadRemoved(GstElement *s, guint pt, GstPad *P, gpointer d) ;
 static void paddEventAdded(GstElement *s, GstPad *p, gpointer d) ;
 static void paddEventRemoved(GstElement *s, GstPad *p, gpointer d) ;
@@ -65,23 +69,13 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D) ;
 gboolean terminate =FALSE;
 gboolean sigrcvd = FALSE ;
 static dcvFrameData_t Dv ;
-static char termdesc[] = "\
-r3psrc name=r3ps ! application/x-rtp ! rtpptdemux name=rpdmx \
-dcv name=dcvTerminal \
-rpdmx.src_96 ! queue ! rtph264depay name=vsd ! parsebin ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! queue ! dcvTerminal.video_sink \
-rpdmx.src_102 ! queue ! rtpgstdepay name=rgpd ! application/x-rtp ! dcvTerminal.rtp_sink \
-dcvTerminal.video_src ! video/x-raw,format=BGR ! queue ! %s";
 
-static char relaydesc[] = "\
-udpsrc ! application/x-rtp ! queue ! rtpptdemux name=rpdmx \
-dcv name=dcvRelay \
-rpdmx.src_96 ! queue name=q1 ! rtph264depay name=vsd ! queue ! tee name=tpoint \
-rpdmx.src_102 ! queue name=q2 ! rtpgstdepay name=rgpd ! dcvRelay.rtp_sink \
-tpoint.src_0 ! queue name=q3 ! parsebin ! avdec_h264 name=vdec ! videoconvert ! video/x-raw,format=BGR ! videoscale ! dcvRelay.video_sink \
-rtpmux name=mux !  queue ! appsink name=usink \
-dcvRelay.video_src ! queue name=q5 ! video/x-raw,format=BGR ! %s \
-tpoint.src_1 ! queue ! parsebin ! rtph264pay ! mux.sink_0 \
-dcvRelay.rtp_src ! rtpgstpay name=rgpy ! application/x-rtp,media=application,clock-rate=90000,payload=102,encoding-name=X-GST ! mux.sink_1";
+//termdesc = dcvdecl + indesc + procdesc + fakesink  + termdesc for tpoint 1
+static char termdesc[] = "\
+tpoint.src_1 ! queue ! fakesink" ;
+
+//relaydesc = indesc + procdesc + outdesc
+char * relaydesc = outdesc ;
 
 
 gboolean dcvQueuesLoaded(dpipe_t *pD, grcvr_mode_e grcvrMode) ;
@@ -97,15 +91,14 @@ int main( int argc, char** argv )
 	GError *gerr = NULL;
 	char ch;
 	extern char *optarg;
-	guint rxport = 50019;
+	guint rxport = 50013;
 	gboolean dumpPipe = FALSE ;
 	gboolean stage1 = FALSE ;
 	gboolean tx=TRUE ;
 	gboolean localdisplay = false ;
-	char *pdesc = termdesc ;
-	char srcdesc[1024] ;
+	char srcdesc[8192] ;
 	guint txport = 50020 ;
-	char ipaddress[45] = "192.168.1.71" ;
+	char ipaddress[45] = "192.168.16.205" ;
 	grcvr_mode_e grcvrMode = GRCVR_LAST ;
 	extern int strictCheck ;
 
@@ -159,14 +152,23 @@ int main( int argc, char** argv )
 	}
 	gst_init(&argc, &argv) ;
 	GST_DEBUG_CATEGORY_INIT (dscope_debug, "dcv", 0, "This is my very own");
-	if (grcvrMode == GRCVR_INTERMEDIATE) pdesc = relaydesc ;
-	sprintf(srcdesc,pdesc,(localdisplay == true? "autovideosink":"fakesink")) ;
-	printf("pdesc=%s\n",srcdesc);
+	char outpdesc[8192] ;
+	sprintf(outpdesc,"dcv name=dcvMod %s %s %s %s",
+			indesc,
+			procdesc,
+			localdisplay == true ? "autovideosink":"fakesink",
+			termdesc) ;
 
+	printf("Pipeline:\n\ndcv name=dcvMod\n %s\n%s %s\n %s\n\n",
+			indesc,
+			procdesc,
+			localdisplay == true ? "autovideosink":"fakesink",
+			termdesc) ;
 	
 	GstPad *rtpsink1, *rtpsink2, *mqsrc ;
 
-	D.pipeline = gst_parse_launch(srcdesc, &gerr);	
+	D.pipeline = gst_parse_launch(outpdesc, &gerr);	
+	
 	if (gerr != NULL) {
 		g_print("Couldn't create pipeline:%s\n", gerr->message) ;
 		g_error_free(gerr) ;
@@ -183,16 +185,22 @@ int main( int argc, char** argv )
 	/** Configure the end-points **/
 
 	gerr = NULL ;
-	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "H264", NULL);
-	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "payload", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
+	D.vcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "video", "pt", G_TYPE_INT, 96, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "H264", NULL);
+	D.dcaps = gst_caps_new_simple ("application/x-rtp", "media", G_TYPE_STRING, "application", "pt", G_TYPE_INT, 102, "clock-rate", G_TYPE_INT, 90000, "encoding-name", G_TYPE_STRING, "X-GST", NULL);
 	if (grcvrMode == GRCVR_INTERMEDIATE) {
 		D.usink = GST_APP_SINK_CAST(gst_bin_get_by_name(GST_BIN(D.pipeline),"usink")) ;
 		dcvConfigAppSink(D.usink,dcvAppSinkNewSample, D.ftc, dcvAppSinkNewPreroll, D.ftc,dcvEosRcvd, &D.ftc) ; 
 	}
 	/** Saving the depayloader pads **/
+	if (configurePortsIndesc(rxport,ipaddress,GST_ELEMENT(D.pipeline)) != TRUE) {
+
+		GST_ERROR_OBJECT(D.pipeline,"Couldn't configure inbound ports\n") ;
+		exit(3) ;
+	}
 	{
 		{
 			GstElement *vsdepay = gst_bin_get_by_name( GST_BIN(D.pipeline),"vsd") ; 
+			GstElement *rgpdepay = gst_bin_get_by_name( GST_BIN(D.pipeline),"rgpd") ; 
 			GstCaps *cps;
 			GstPad * pad = gst_element_get_static_pad(vsdepay ,"sink") ;
 			if (pad == NULL) {
@@ -201,11 +209,6 @@ int main( int argc, char** argv )
 			cps = gst_pad_query_caps(pad,NULL) ;
 			g_print("H264 Depay can handle:%s\n", gst_caps_to_string(cps)) ;
 			gst_pad_set_caps(pad,D.vcaps) ;
-		}
-		{
-			GstElement *r3ps = gst_bin_get_by_name( GST_BIN(D.pipeline),"r3ps") ;
-			g_object_set(G_OBJECT(r3ps),"host","192.168.16.205",NULL);
-			g_object_set(G_OBJECT(r3ps),"port",rxport,NULL);
 		}
 #if 0
 #endif
@@ -229,16 +232,21 @@ int main( int argc, char** argv )
 			gst_pad_set_caps(gstextpad,D.dcaps) ;
 		}
 		{
-			GstElement *rtpdmx = gst_bin_get_by_name( GST_BIN(D.pipeline),"rpdmx") ;
-			g_assert(rtpdmx) ;
-			g_signal_connect(rtpdmx, "new-payload-type", G_CALLBACK(demuxpadAdded), &D) ;
-			g_signal_connect(rtpdmx, "pad-added", G_CALLBACK(paddEventAdded), &D) ;
-			g_signal_connect(rtpdmx, "pad-removed", G_CALLBACK(paddEventRemoved), &D) ;
+			GstElement *rtpdmx = gst_bin_get_by_name( GST_BIN(D.pipeline),"rtpgst0") ;
+			D.gstq1 = gst_bin_get_by_name(GST_BIN(D.pipeline),"gstq1") ;
+			D.videoq1 = gst_bin_get_by_name(GST_BIN(D.pipeline),"videoq1") ;
+			if (rtpdmx != NULL) {
+				g_signal_connect(rtpdmx, "request-pt-map", G_CALLBACK(rtpBinPtMap), &D) ;
+				g_signal_connect(rtpdmx, "pad-added", G_CALLBACK(paddEventAdded), &D) ;
+				g_signal_connect(rtpdmx, "pad-removed", G_CALLBACK(paddEventRemoved), &D) ;
+			}
+			rtpdmx = gst_bin_get_by_name( GST_BIN(D.pipeline),"rtpvid1") ;
+			if (rtpdmx != NULL) {
+				g_signal_connect(rtpdmx, "request-pt-map", G_CALLBACK(rtpBinPtMap), &D) ;
+				g_signal_connect(rtpdmx, "pad-added", G_CALLBACK(paddEventAdded), &D) ;
+				g_signal_connect(rtpdmx, "pad-removed", G_CALLBACK(paddEventRemoved), &D) ;
+			}
 		}
-#if 0
-		{
-		}
-#endif
 		{
 			
 			GValue valueFn = { 0 } ;
@@ -247,11 +255,11 @@ int main( int argc, char** argv )
 			if (grcvrMode == GRCVR_LAST)
 			{
 				F.sf = stage2 ;
-				D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvTerminal") ;
+				D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvMod") ;
 			}
 			else {
 				F.sf = stagen ;
-				D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvRelay") ;
+				D.dcv = gst_bin_get_by_name(GST_BIN(D.pipeline),"dcvMod") ;
 			}
 			g_print("Setting execution function for %s\n",gst_element_get_name(D.dcv)) ;
 			g_value_init(&valueFn,G_TYPE_POINTER) ;
@@ -294,6 +302,14 @@ int main( int argc, char** argv )
 
 		terminate = listenToBus(D.pipeline,&inputstate,&oldstate, 25) ;
 	} while (terminate == FALSE) ;
+
+	{
+		guint currentBytes,currentTime ;
+		g_object_get(gst_bin_get_by_name(GST_BIN(D.pipeline),"gstq1"),
+				"current-level-bytes", &currentBytes,
+				"current-level-time", &currentTime, NULL) ;
+		g_print("GST QUEUE 1: Backlog  %u, %u\n",currentBytes,currentTime) ;
+	}
 	g_print("Exiting!\n") ;
 }
 
@@ -337,7 +353,7 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 {
 	GstPad *sinkpad;
 	GstElement *dec = (GstElement *)D;
-	g_print("Received pad added signal\n") ;
+	g_print("muxpadAdded:Received pad added signal\n") ;
 	sinkpad = gst_element_get_static_pad(dec ,"sink") ;
 	gst_pad_link(p,sinkpad) ;
 	gst_object_unref(sinkpad);
@@ -346,7 +362,31 @@ static void muxpadAdded(GstElement *s, GstPad *p, gpointer *D)
 /** demux pad handlers **/
 static void paddEventAdded(GstElement *g, GstPad *p, gpointer d)
 {
-	g_print("%s pad added\n",GST_PAD_NAME(p)) ;
+	GstPad *peer ;
+	dpipe_t *dp = (dpipe_t *)d;
+	peer = gst_pad_get_peer(p) ;
+	gchar *padname = GST_PAD_NAME(p) ;
+	GST_OBJECT_LOCK(GST_OBJECT(g)) ;
+	g_print("%s pad added\n",padname) ;
+	if (peer) 
+		g_print("%s connected to %s\n",GST_PAD_NAME(p), GST_PAD_NAME(gst_pad_get_peer(p))) ;
+	else 
+	{
+		guint s1,session,pt;
+		GstPadLinkReturn padret;
+		sscanf(padname,"recv_rtp_src_%u_%u_%u",&s1,&session,&pt) ;
+		if (pt == 102)
+			peer = gst_element_get_static_pad(dp->gstq1,"sink") ;
+		else
+			peer = gst_element_get_static_pad(dp->videoq1,"sink") ;
+		if (gst_pad_is_linked(peer))
+			g_print("peer is already linked to %s\n",GST_PAD_NAME(gst_pad_get_peer(peer))) ;
+		else if ( (padret = gst_pad_link(p,peer)) != GST_PAD_LINK_OK)
+			g_print("Linking failed! retval=%d\n",padret) ;
+		else
+			g_print("Linked pad %s to %s\n", padname, GST_PAD_NAME(peer)) ;
+	}
+	GST_OBJECT_UNLOCK(GST_OBJECT(g)) ;
 }
 
 static void paddEventRemoved(GstElement *g, GstPad *p, gpointer d)
@@ -354,12 +394,19 @@ static void paddEventRemoved(GstElement *g, GstPad *p, gpointer d)
 	g_print("%s pad removed\n",GST_PAD_NAME(p)) ;
 }
 
-static void demuxpadAdded(GstElement *s, guint pt, GstPad *P, gpointer d)
+static int rtpBinPtChanged(GstElement *s, guint session, guint pt, gpointer d)
+{
+	g_print("Session %u pt changed to %d\n",session,pt) ;
+}
+
+static GstCaps * rtpBinPtMap(GstElement *s, guint pt, gpointer d)
 {
 	static char vpn[] = "sinkv" ;
 	static char dpn[] = "sinkd" ;
 	char *nm;
 	dpipe_t *dp = (dpipe_t *)d;
+	GstPad *P = gst_element_get_static_pad(s,"recv_rtp_src") ; 
+	GST_OBJECT_LOCK(GST_OBJECT(s)) ;
 #if 0
 	GstPad *vpd = dp->vp9extpad;
 	GstPad *gpd = dp->gstextpad;
@@ -367,29 +414,34 @@ static void demuxpadAdded(GstElement *s, guint pt, GstPad *P, gpointer d)
 #endif
 	GstCaps *tcps = (pt == 102 ? dp->dcaps:dp->vcaps) ;
 	nm = (pt == 102 ? dpn:vpn) ;
-	g_print("Received pad added signal for pt=%d %s\n",pt,GST_PAD_NAME(P)) ;
-	gst_pad_set_caps(P,tcps) ;
-	gst_pad_set_active(P,TRUE) ;
-
-#if 0
-	if (GST_PAD_IS_LINKED(P)) {
-		g_print("Pad already linked!\n") ;
+	g_print("BinMap: Received pad added signal for pt=%d\n",pt) ;
+	g_print("Returning caps:%s\n",gst_caps_to_string(tcps)) ;
+	if (P==NULL) 
+		g_print("Pad is null\n") ;
+	else if (GST_PAD_IS_LINKED(P)) {
+		GstPad *pp  ;
+		while (P && GST_PAD_IS_LINKED(P))
+		{
+			P = gst_pad_get_peer(P) ;
+			GstCaps *peercaps = gst_pad_query_caps(P,NULL) ;
+			g_print("Pad linked!:to %s of %s, caps=%s\n", 
+				GST_PAD_NAME(P), 
+				GST_ELEMENT_NAME(gst_pad_get_parent_element(P)),
+				gst_caps_to_string(peercaps)) ;
+			P = gst_element_get_static_pad(gst_pad_get_parent_element(P),"src") ;
+		}	 
 	}
+	else {
+		g_print("Pad not linked\n") ;
+	}
+#if 0
 	if (GST_PAD_IS_LINKED(tpd)) {
 		g_print("SinkPad already linked!\n") ;
 	}
 	else gst_pad_link(P,tpd) ;
 #endif
-	gst_pad_set_caps(P,tcps) ;
-	{
-		GstCaps *t1 = gst_pad_query_caps(P,NULL) ;
-		GstCaps *t2 = gst_pad_query_caps(gst_pad_get_peer(P),NULL) ;
-		g_print("Marrying caps:%s on %s to caps %s on %s\n",
-				gst_caps_to_string(t1), 
-				GST_PAD_NAME(P),
-				gst_caps_to_string(t2),
-				GST_PAD_NAME(gst_pad_get_peer(P))) ;
-	}
+	GST_OBJECT_UNLOCK(GST_OBJECT(s)) ;
+	return tcps ;
 }
 
 static void demuxpadRemoved(GstElement *s, guint pt, GstPad *P, gpointer d)

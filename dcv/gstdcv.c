@@ -187,7 +187,9 @@ gst_dcv_class_init (GstdcvClass * klass)
 static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 {
   	Gstdcv *gdcv = GST_DCV (parent);
-	GST_FIXME_OBJECT (parent,"Received query of type %s\n", gst_query_type_get_name(GST_QUERY_TYPE(query))) ;
+	GST_FIXME_OBJECT (parent,"Received query of type %s on pad %s\n", 
+		gst_query_type_get_name(GST_QUERY_TYPE(query)),
+		GST_PAD_NAME(pad)) ;
 	gboolean ret = TRUE ;
 	switch (GST_QUERY_TYPE(query)) {
 		case GST_QUERY_CAPS:
@@ -313,19 +315,15 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 	}
 
 	else if ( ((filter->vfmatch = dcvFindMatchingContainer(pd->videoframequeue.bufq,dataFrameContainer,&T)) == -1) ) {
-		if (dcvGstDebug) 
 		GST_DEBUG_OBJECT(GST_OBJECT(filter),"no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
 				g_queue_get_length(pd->videoframequeue.bufq), 
 				g_queue_get_length(pd->olddataqueue.bufq)) ;
 		
-		GST_LOG_OBJECT(GST_OBJECT(filter),"no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
-				g_queue_get_length(pd->videoframequeue.bufq), 
-				g_queue_get_length(pd->olddataqueue.bufq)) ;
 #if 1
 		if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
-				dcvBufContainerFree(dataFrameContainer) ;
-				free(dataFrameContainer) ;
-				GST_DEBUG_OBJECT(GST_OBJECT(filter),"Dropping data buffer, no match for too long\n") ;
+				//dcvBufContainerFree(dataFrameContainer) ;
+				//free(dataFrameContainer) ;
+				GST_ERROR_OBJECT(GST_OBJECT(filter),"Dropping data buffer, no match for too long\n") ;
 		}
 		else 
 			g_queue_push_head(pd->olddataqueue.bufq,dataFrameContainer) ;
@@ -359,11 +357,14 @@ GRCVR_PROCESS:
 			}
 			if (gst_pad_is_linked(filter->video_out))
 			{
+				GstPad *peerpad = gst_pad_get_peer(filter->video_out) ;
 				GST_LOG_OBJECT(GST_OBJECT(filter),"Transmitting video frame\n") ;
 				if (dcvGstDebug) GST_DEBUG_OBJECT(GST_OBJECT(filter),"Transmitting video frame\n") ;
-				if (gst_pad_push(filter->video_out,newVideoFrame) != GST_FLOW_OK) {
+#if 1
+				if (gst_pad_chain(peerpad,newVideoFrame) != GST_FLOW_OK) {
 					GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push video frame\n") ;
 				}
+#endif
 					
 			}
 			Dv->num_frames++ ;
@@ -382,7 +383,7 @@ GRCVR_PROCESS:
 				if (gst_pad_is_linked(filter->rtp_out)) {
 					ret = gst_pad_push(filter->rtp_out,newDataFrame) ;
 					if (ret != GST_FLOW_OK) {
-						GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push data frame\n") ;
+						GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push data frame ret=%d\n", ret) ;
 					}
 	
 				}
@@ -516,7 +517,13 @@ gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
     case GST_EVENT_EOS:
 	GST_LOG_OBJECT(parent,"Received EOS:%s", dcvGetQueueStatus(filter)) ;
 	if (!filter->eosFwd)
-		ret= TRUE ;
+	{
+		GST_ERROR_OBJECT(parent,"EOS received (vq=%u dq=%u oq=%u)\n", 
+				g_queue_get_length(filter->Q.videoframequeue.bufq), 
+				g_queue_get_length(filter->Q.olddataqueue.bufq),
+				g_queue_get_length(filter->Q.dataqueue.bufq)) ;
+		ret= gst_pad_event_default(pad,parent,event) ;
+	}
 	else
 		ret = gst_pad_event_default(pad,parent,event) ;
 	break ;

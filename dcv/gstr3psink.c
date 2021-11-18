@@ -238,9 +238,9 @@ gst_r3p_sink_render (GstBaseSink * bsink, GstBuffer * buf)
 #endif
   g_assert(map.size <= 99999) ;
   {
-	char hdr[14] ;
-	sprintf(hdr,"RCV MSG %5d\n",map.size) ;
-	if ((rret = g_socket_send(sink->socket,hdr,14,sink->cancellable,&err)) != 14) {
+	char hdr[15] ;
+	sprintf(hdr,"RCV MSG %d\n",map.size) ;
+	if ((rret = g_socket_send(sink->socket,hdr,strlen(hdr),sink->cancellable,&err)) != 14) {
 		rret = -1;
 	}
 	if (err != NULL) g_error_free(err) ;

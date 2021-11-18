@@ -199,6 +199,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   GError *err = NULL;
   GstMapInfo map;
 
+  GST_OBJECT_LOCK(G_OBJECT(psrc)) ;
   src = GST_R3P_SRC (psrc);
 
   if (!GST_OBJECT_FLAG_IS_SET (src, GST_R3P_SRC_OPEN))
@@ -257,11 +258,10 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   }
 
   if (avail > 0) {
-	g_assert(avail >= 14) ;
-	char hdr[14] ;
+	char hdr[15] ;
 	int tlen,nread ;
 	rret = g_socket_receive(src->client_socket,hdr,14,NULL,&src->err) ;
-	if (rret < 14)
+	if (rret < 8)
 		goto get_available_error ;
 	if ( (nread = sscanf(hdr,"RCV MSG %5d\n",&tlen)) < 1) 
 	{
@@ -272,6 +272,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
     	*outbuf = gst_buffer_new_and_alloc (tlen);
 	gst_buffer_map (*outbuf, &map, GST_MAP_READWRITE);
 
+	usleep(50000) ;
 	if (g_socket_send(src->client_socket, "OK", 3,NULL, &src->err) != 3){
 			GST_ERROR_OBJECT(src,"Couldn't send ok message\n") ;
 			goto get_available_error ;
@@ -318,7 +319,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
     gst_buffer_unmap (*outbuf, &map);
     gst_buffer_resize (*outbuf, 0, rret);
 
-    GST_LOG_OBJECT (src,
+    GST_DEBUG_OBJECT (src,
         "Returning buffer from _get of size %" G_GSIZE_FORMAT ", ts %"
         GST_TIME_FORMAT ", dur %" GST_TIME_FORMAT
         ", offset %" G_GINT64_FORMAT ", offset_end %" G_GINT64_FORMAT,
@@ -330,6 +331,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   g_clear_error (&err);
 
 done:
+  GST_OBJECT_UNLOCK(G_OBJECT(psrc)) ;
   return ret;
 
 wrong_state:
