@@ -272,7 +272,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
     	*outbuf = gst_buffer_new_and_alloc (tlen);
 	gst_buffer_map (*outbuf, &map, GST_MAP_READWRITE);
 
-	usleep(50000) ;
+	usleep(500) ;
 	if (g_socket_send(src->client_socket, "OK", 3,NULL, &src->err) != 3){
 			GST_ERROR_OBJECT(src,"Couldn't send ok message\n") ;
 			goto get_available_error ;

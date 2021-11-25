@@ -196,11 +196,11 @@ int dcvBufQInit(dcv_bufq_t *P)
 	P->entries = 0;
 }
 
-GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb)
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb, grcvr_mode_e mode)
 {
 	gst_dcv_stage_t *F = (gst_dcv_stage_t *)execFn ;
 	if (F != NULL)
-		return dcvProcessStage(vbuf,gcaps,dbuf,df,F->sf,newvb) ;
+		return dcvProcessStage(vbuf,gcaps,dbuf,df,F->sf,newvb,mode) ;
 	else 
-		return dcvProcessStage(vbuf,gcaps,dbuf,df,NULL,newvb) ;
+		return dcvProcessStage(vbuf,gcaps,dbuf,df,NULL,newvb,mode) ;
 }

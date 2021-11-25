@@ -13,21 +13,21 @@
 
 
 char outdesc[] = "\
-rtpbin name=rtpgst0 \
-rtpgst0.send_rtp_src_0 ! queue ! r3psink name=r3p0 port=50013 \
-rtpgst0.send_rtp_src_1 ! queue ! r3psink name=r3p1 port=50018 \
-udpsrc name=rtcpsrc0 port=50311 ! rtpgst0.recv_rtcp_sink_0 \
-udpsrc name=rtcpsrc1 port=50312 ! rtpgst0.recv_rtcp_sink_1 \
-tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=vsq ! rtpgst0.send_rtp_sink_1 \
-dcvMod.rtp_src ! queue name=dsq ! application/x-rtp,media=application,payload=102 ! rtpgstpay name=rgpy pt=102 ! rtpgst0.send_rtp_sink_0" ;
+rtpbin name=rtpgstb0 \
+rtpgstb0.send_rtp_src_0 ! queue ! r3psink name=r3p0 port=50013 \
+rtpgstb0.send_rtp_src_1 ! queue ! r3psink name=r3p1 port=50018 \
+udpsrc name=rtcpsrc0 port=50311 ! rtpgstb0.recv_rtcp_sink_0 \
+udpsrc name=rtcpsrc1 port=50312 ! rtpgstb0.recv_rtcp_sink_1 \
+tpoint.src_1 ! parsebin ! rtph264pay name=vppy ! queue name=vsq ! rtpgstb0.send_rtp_sink_1 \
+dcvMod.rtp_src ! queue name=dsq ! application/x-rtp,media=application,payload=102 ! rtpgstpay name=rgpy pt=102 ! rtpgstb0.send_rtp_sink_0" ;
 
 char indesc[] = "\
 rtpsession name=rtpgst0 \
 rtpsession name=rtpvid1 \
 r3psrc name=r3r0 port=50013 ! rtpgst0.recv_rtp_sink \
 r3psrc name=r3r1 port=50018 ! rtpvid1.recv_rtp_sink \
-rtpgst0.send_rtcp_src ! queue ! udpsink name=rtcpsrc0 port=50310 \
-rtpvid1.send_rtcp_src ! queue ! udpsink name=rtcpsrc1 port=50311 \
+rtpgst0.send_rtcp_src ! queue ! udpsink name=rtcpsink0 port=50310 \
+rtpvid1.send_rtcp_src ! queue ! udpsink name=rtcpsink1 port=50311 \
 rtpvid1.recv_rtp_src ! application/x-rtp,media=video,clock-rate=90000 ! rtph264depay name=vsd ! parsebin ! tee name=tpoint \
 rtpgst0.recv_rtp_src ! application/x-rtp,media=application,clock-rate=90000 ! rtpgstdepay name=rgpd ! application/x-rtp ! dcvMod.rtp_sink " ;
 
@@ -79,10 +79,10 @@ gboolean configurePortsIndesc(int txport, char * srcIp, GstElement *bin)
 		g_object_set(G_OBJECT(r3psink),"port",txport+2, NULL) ;
 	}
 	else return FALSE ;
-	udps = gst_bin_get_by_name(GST_BIN(bin),"rtcpsrc0") ;
+	udps = gst_bin_get_by_name(GST_BIN(bin),"rtcpsink0") ;
 	if (udps == NULL) return FALSE ;
 	g_object_set(G_OBJECT(udps),"port",txport+1, NULL) ;
-	udps = gst_bin_get_by_name(GST_BIN(bin),"rtcpsrc1") ;
+	udps = gst_bin_get_by_name(GST_BIN(bin),"rtcpsink1") ;
 	if (udps == NULL) return FALSE ;
 	g_object_set(G_OBJECT(udps),"port",txport+3, NULL) ;
 	g_print("Setting gst tx port %u, video tx port %u, gst rtcp rx port %u, video rtcp rx port %u\n",
