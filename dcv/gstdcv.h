@@ -100,6 +100,13 @@ typedef struct {
 	double avgProcessTime ;
 }  dcvFrameData_t ;
 
+typedef int (* dcvStageFn_t )(cv::Mat , void *, int , void * , int ) ;
+typedef GstBuffer * (* dcvProcessFn_t)(GstBuffer *,GstCaps *,GstBuffer *,dcvFrameData_t *,dcvStageFn_t, GstBuffer **) ;
+typedef struct {
+	dcvProcessFn_t mf;
+	dcvStageFn_t sf;
+} gst_dcv_stage_t ;
+
 struct _Gstdcv
 {
   GstElement element;
@@ -108,7 +115,8 @@ struct _Gstdcv
   GstPad *video_out, *rtp_out;
 
   gboolean silent;
-  gpointer execFn;
+  gboolean eosFwd ;
+  gst_dcv_stage_t execFn;
   gint     grcvrMode ;
   gint     vfmatch ;
   gint     vbufsnt;
@@ -121,13 +129,6 @@ struct _Gstdcv
 } ;
 
 
-typedef int (* dcvStageFn_t )(cv::Mat , void *, int , void * , int ) ;
-typedef GstBuffer * (* dcvProcessFn_t)(GstBuffer *,GstCaps *,GstBuffer *,dcvFrameData_t *,dcvStageFn_t, GstBuffer **) ;
-typedef struct {
-	dcvProcessFn_t mf;
-	dcvStageFn_t sf;
-} gst_dcv_stage_t ;
-
 typedef int (* dcv_fn_t )(void * img, void *dataIn, int insize, void * pointlist, int outdatasize) ;
 #define GST_DCV(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DCV,Gstdcv))
 #define GST_DCV_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_DCV,GstdcvClass))
@@ -136,7 +137,7 @@ typedef int (* dcv_fn_t )(void * img, void *dataIn, int insize, void * pointlist
 
 static int dcvProcessQueuesDcv(Gstdcv * filter) ;
 gboolean sink_pushbufferToQueue(GstBuffer *gb,gpointer pD) ;
-GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb) ;
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb, grcvr_mode_e ) ;
 /* Standard function returning type information. */
 GType gst_my_filter_get_type (void);
 G_END_DECLS

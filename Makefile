@@ -12,21 +12,21 @@ CFLAGS = -pthread -I/usr/local/include/gstreamer-1.0 -I/usr/include/glib-2.0 -I/
 	 -I$(OPENCV_DIR)/modules/core/include -I$(OPENCV_DIR)/build/  -I$(OPENCV_DIR)/modules/videoio/include
 CPPFLAGS = -fpermissive -DFOESTAGE -DRTP_MUX -DVP9PAY -DVP9PAYDS $(CFLAGS) 
 LDFLAGS =  -L$(LIBDIR) -lgstreamer-1.0 -lgstapp-1.0 -lgobject-2.0 -lglib-2.0 
-DEPFILES = rseq.h gutils.hpp gsftc.hpp dsopencv.hpp
+DEPFILES = rseq.h gutils.hpp gsftc.hpp dsopencv.hpp gpipe.h
 OLIBDIR = /home/ggne0015/src/opencv-4.1.1/build/lib 
 .cpp.o:
 	$(CPP) $(CPPFLAGS) -fPIC -c $*.cpp
 .c.o:
 	$(CC) $(CFLAGS) -fPIC -c $*.c
 
-all: gdyn grcvr gsproc dcv.so dcvrtpmux.so dcvr3p.so
+all: gdyn grcvr gsproc dcv.so dcvrtpmux.so gstr3p.so
 
 
-gdyn: gdyn.o gsftc.o gutils.o dsopencv.o $(DEPFILES)
-	$(LDCPP) -o $@ gdyn.o gsftc.o gutils.o dsopencv.o  $(LDFLAGS) -lopencv_world -lm
+gdyn: gdyn.o gsftc.o gutils.o dsopencv.o gpipe.o $(DEPFILES)
+	$(LDCPP) -o $@ gdyn.o gsftc.o gutils.o dsopencv.o gpipe.o  $(LDFLAGS) -lopencv_world -lm
 
-grcvr : grcvr.o gutils.o gsftc.o dsopencv.o $(DEPFILES)
-	$(LDCPP) -o $@ grcvr.o gutils.o gsftc.o dsopencv.o $(LDFLAGS) -lopencv_world  -lm
+grcvr : grcvr.o gutils.o gsftc.o dsopencv.o gpipe.o $(DEPFILES)
+	$(LDCPP) -o $@ grcvr.o gutils.o gsftc.o dsopencv.o gpipe.o  $(LDFLAGS) -lopencv_world  -lm
 
 foe: foeTest.o foe.o
 	$(LD) -o $@ foeTest.o foe.o -lgsl -lgslcblas  -lm
@@ -39,8 +39,8 @@ lkdemo: $(LKDEMOOPT)
 dcv.so: 
 	cd dcv ; make dcv.so
 
-dcvr3p.so: 
-	cd dcv ; make dcvr3p.so
+gstr3p.so: 
+	cd dcv ; make gstr3p.so
 
 dcvrtpmux.so:
 	cd dcv ; make dcvrtpmux.so

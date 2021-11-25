@@ -88,7 +88,8 @@ enum
   PROP_0,
   PROP_SILENT,
   PROP_DCV_EXEC_FN,
-  PROP_DCV_MODE
+  PROP_DCV_MODE,
+  PROP_EOS_FWD
 };
 #define MAX_STAY 1
 
@@ -162,6 +163,10 @@ gst_dcv_class_init (GstdcvClass * klass)
       g_param_spec_int ("grcvrMode", "grcvrMode", "Intermediate/Terminal",
           0,GRCVR_MODEMAX, GRCVR_LAST, G_PARAM_READWRITE));
 
+  g_object_class_install_property (gobject_class, PROP_EOS_FWD,
+      g_param_spec_boolean ("eosFwd", "eosFwd", "eos Forwarding",
+          TRUE,G_PARAM_READWRITE));
+
   gst_element_class_set_details_simple(gstelement_class,
     "dcv",
     "FIXME:Generic",
@@ -182,8 +187,9 @@ gst_dcv_class_init (GstdcvClass * klass)
 static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 {
   	Gstdcv *gdcv = GST_DCV (parent);
-	g_print ("%s: Received query of type %u\n", 
-		gst_element_get_name(GST_ELEMENT(gdcv)),GST_QUERY_TYPE(query)) ;
+	GST_FIXME_OBJECT (parent,"Received query of type %s on pad %s\n", 
+		gst_query_type_get_name(GST_QUERY_TYPE(query)),
+		GST_PAD_NAME(pad)) ;
 	gboolean ret = TRUE ;
 	switch (GST_QUERY_TYPE(query)) {
 		case GST_QUERY_CAPS:
@@ -191,9 +197,7 @@ static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 			GstCaps *filter, *caps;
 
 			gst_query_parse_caps (query, &filter);
-			g_print("%s: Caps query received:%s\n",
-					gst_element_get_name(GST_ELEMENT(gdcv)),
-					gst_caps_to_string(filter)) ;
+			GST_LOG_OBJECT(parent,": Caps query received:%s\n", gst_caps_to_string(filter)) ;
 			if (pad == gdcv->rtp_in || pad == gdcv->rtp_out)
 			{
 				if (gdcv->dcaps == NULL)
@@ -211,7 +215,7 @@ static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 					NULL);
 				else caps = gdcv->vcaps ;
 			}
-			g_print("dcvTerminal: Returning query response %s\n",gst_caps_to_string(caps)) ;
+			GST_LOG_OBJECT(parent,"dcvTerminal: Returning query response %s\n",gst_caps_to_string(caps)) ;
 			gst_query_set_caps_result (query, caps);
 			gst_caps_unref (caps);
 			ret = TRUE;
@@ -221,13 +225,14 @@ static gboolean gstQueryFunc(GstPad *pad, GstObject *parent, GstQuery *query)
 		{
 			GstCaps *caps ;
 			gst_query_parse_accept_caps(query,&caps) ;
-			g_print("dcvTerminal: Accept caps:%s\n",gst_caps_to_string(caps)) ;
+			GST_LOG_OBJECT(parent,"dcvTerminal: Accept caps:%s\n",gst_caps_to_string(caps)) ;
 			ret = TRUE;
           		gst_query_set_accept_caps_result (query, TRUE);
 			break ;
 		}
 		default:
-			g_print("Couldn't understand this query\n") ;
+			GST_DEBUG_OBJECT(parent,"Couldn't understand this query:%s\n",
+				gst_query_type_get_name(GST_QUERY_TYPE(query))) ;
 			ret = gst_pad_query_default(pad,parent,query) ;
 			break;
 	}
@@ -263,7 +268,7 @@ gst_dcv_init (Gstdcv * filter)
   gst_element_add_pad (GST_ELEMENT (filter), filter->rtp_out);
 
   filter->silent = FALSE;
-  filter->execFn = NULL ;
+  filter->execFn = { NULL,NULL} ;
   filter->grcvrMode = GRCVR_LAST ;
   filter->vcaps = filter->dcaps = NULL ;
   filter->dcvDataRx = filter->dcvVideoRx = 0;
@@ -289,8 +294,7 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 	GstFlowReturn ret = GST_FLOW_ERROR ;
 	extern int donothing(void *) ;
 
-	if (dcvGstDebug)
-		g_print("Entered dcvProcessQueuesDcv: vfmatch=%d, grcvrMode= %u \n",
+	GST_LOG_OBJECT(GST_OBJECT(filter),"Entered dcvProcessQueuesDcv: vfmatch=%d, grcvrMode= %u \n",
 			filter->vfmatch, grcvrMode) ;
 	if (filter->vfmatch == -1) {
 		/** We failed last time, see if something has changed **/
@@ -310,34 +314,28 @@ static int dcvProcessQueuesDcv(Gstdcv * filter)
 	}
 
 	else if ( ((filter->vfmatch = dcvFindMatchingContainer(pd->videoframequeue.bufq,dataFrameContainer,&T)) == -1) ) {
-		if (dcvGstDebug) 
-		g_print("no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
+		GST_DEBUG_OBJECT(GST_OBJECT(filter),"no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
 				g_queue_get_length(pd->videoframequeue.bufq), 
 				g_queue_get_length(pd->olddataqueue.bufq)) ;
 		
-		GST_LOG_OBJECT(GST_OBJECT(filter),"no match found: vfmatch=%d (vq=%u dq=%u)\n",filter->vfmatch, 
-				g_queue_get_length(pd->videoframequeue.bufq), 
-				g_queue_get_length(pd->olddataqueue.bufq)) ;
 #if 1
 		if ( (stay = dcvLengthOfStay(dataFrameContainer)) > MAX_STAY)  {
-				dcvBufContainerFree(dataFrameContainer) ;
-				free(dataFrameContainer) ;
-				g_print("Dropping data buffer, no match for too long\n") ;
+				//dcvBufContainerFree(dataFrameContainer) ;
+				//free(dataFrameContainer) ;
+				GST_ERROR_OBJECT(GST_OBJECT(filter),"Dropping data buffer, no match for too long\n") ;
 		}
 		else 
 			g_queue_push_head(pd->olddataqueue.bufq,dataFrameContainer) ;
 #endif
 		gettimeofday(&lastCheck,&tz) ;
 		GST_LOG_OBJECT(GST_OBJECT(filter),"Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
-		if (dcvGstDebug) 
-		g_print("Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
+		GST_DEBUG_OBJECT(GST_OBJECT(filter),"Recording last failed check at %u:%u\n",lastCheck.tv_sec, lastCheck.tv_usec) ;
 		return 0 ;
 	}
-	if (dcvGstDebug)
-		g_print("Entering stage function:\n") ;
+	GST_DEBUG_OBJECT(GST_OBJECT(filter),"Match Found: %u Entering stage function:\n",filter->vfmatch) ;
 GRCVR_PROCESS:
 	{
-		dcv_fn_t stagef = (dcv_fn_t)filter->execFn;
+		gst_dcv_stage_t stagef = filter->execFn;
 		dcv_BufContainer_t *qe = ((dcv_BufContainer_t *)g_queue_pop_nth(pd->videoframequeue.bufq,filter->vfmatch)) ;
 		GstBuffer * newVideoFrame = NULL ;
 		GstBuffer * newDataFrame = NULL ;
@@ -346,26 +344,30 @@ GRCVR_PROCESS:
 			videoFrameWaiting = qe->nb ;
 			GstCaps *vcaps = qe->caps ;
 #if 1
-			if (stagef != NULL)
-				newDataFrame = dcvProcessFn( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, filter->execFn, &newVideoFrame ) ;
+			if (stagef.sf != NULL)
+				newDataFrame = dcvProcessFn( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, 
+						&stagef, &newVideoFrame, grcvrMode ) ;
 			else 
 #endif
 			{
 				GST_LOG_OBJECT(GST_OBJECT(filter),"Bypassing video frame processing\n") ;
-				newDataFrame = dcvProcessFn( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, NULL, &newVideoFrame ) ;
+				newDataFrame = dcvProcessFn( videoFrameWaiting, vcaps,dataFrameWaiting, Dv, NULL, 
+					&newVideoFrame, grcvrMode ) ;
 			}
 			if (gst_pad_is_linked(filter->video_out))
 			{
+				GstPad *peerpad = gst_pad_get_peer(filter->video_out) ;
 				GST_LOG_OBJECT(GST_OBJECT(filter),"Transmitting video frame\n") ;
-				if (dcvGstDebug) g_print("Transmitting video frame\n") ;
-				if (gst_pad_push(filter->video_out,newVideoFrame) != GST_FLOW_OK) {
+				GST_DEBUG_OBJECT(GST_OBJECT(filter),"Transmitting video frame\n") ;
+#if 1
+				if (gst_pad_chain(peerpad,newVideoFrame) != GST_FLOW_OK) {
 					GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push video frame\n") ;
 				}
+#endif
 					
 			}
 			Dv->num_frames++ ;
-			if (dcvGstDebug)
-			g_print("State of queues:vq=%d dq=%d\n", g_queue_get_length(pd->videoframequeue.bufq), 
+			GST_DEBUG_OBJECT(GST_OBJECT(filter),"State of queues:vq=%d dq=%d\n", g_queue_get_length(pd->videoframequeue.bufq), 
 					g_queue_get_length(pd->olddataqueue.bufq)) ;
 			GST_LOG_OBJECT(GST_OBJECT(filter),
 			"State of queues:vq=%d dq=%d\n", g_queue_get_length(pd->videoframequeue.bufq), 
@@ -379,11 +381,11 @@ GRCVR_PROCESS:
 				if (gst_pad_is_linked(filter->rtp_out)) {
 					ret = gst_pad_push(filter->rtp_out,newDataFrame) ;
 					if (ret != GST_FLOW_OK) {
-						GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push data frame\n") ;
+						GST_WARNING_OBJECT(GST_OBJECT(filter),"Couldn't push data frame ret=%d\n", ret) ;
 					}
 	
 				}
-				if (dcvGstDebug) g_print("Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
+				GST_DEBUG_OBJECT(GST_OBJECT(filter),"Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
 						ret,++(filter->vbufsnt), g_queue_get_length(pd->videoframequeue.bufq), g_queue_get_length(pd->olddataqueue.bufq)) ;
 				GST_LOG_OBJECT(GST_OBJECT(filter),
 					"Pushing data frame .. retval=%d buffers=%d vq=%d dq=%d\n",
@@ -402,14 +404,14 @@ GRCVR_PROCESS:
 				prcTime.tv_usec &= 0xfffff ;
 				tg_usec = (double)((prcTime.tv_sec - tx_sec)%4096)*1000.0 + (double)(prcTime.tv_usec - tx_usec)/1000.0 ;
 				if (tg_usec < 0) {
-					g_print("Something wrong in time processing (%ld %ld proc) (%ld %ld current)\n",
+					GST_DEBUG_OBJECT(GST_OBJECT(filter),"Something wrong in time processing (%ld %ld proc) (%ld %ld current)\n",
 							tx_sec, tx_usec, prcTime.tv_sec,prcTime.tv_usec) ;
 				}
 				else 
 				{
 					Dv->avgProcessTime += tg_usec ;
-					g_print("Time processing (%ld %ld orig) (%ld %ld current)\n", tx_sec, tx_usec, prcTime.tv_sec,prcTime.tv_usec) ;
-					g_print("Processing time for frame %d: %.4g msec: avg=%.4g\n",
+					GST_DEBUG_OBJECT(GST_OBJECT(filter),"Time processing (%ld %ld orig) (%ld %ld current)\n", tx_sec, tx_usec, prcTime.tv_sec,prcTime.tv_usec) ;
+					GST_DEBUG_OBJECT(GST_OBJECT(filter),"Processing time for frame %d: %.4g msec: avg=%.4g\n",
 							Dv->num_frames,tg_usec,Dv->avgProcessTime/Dv->num_frames) ;
 				}
 			}
@@ -420,7 +422,7 @@ GRCVR_PROCESS:
 				gst_buffer_unref(GST_BUFFER_CAST(dataFrameWaiting));
 		}
 		/** Clean up the video frame queue **/
-		g_print("\n") ;
+		GST_DEBUG_OBJECT(GST_OBJECT(filter),"\n") ;
 		return 1 ;
 	}
 }
@@ -430,17 +432,24 @@ gst_dcv_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   Gstdcv *filter = GST_DCV (object);
-  GST_WARNING_OBJECT(object,"Setting property %s, value=%u\n",gst_element_get_name(GST_ELEMENT(object)), prop_id) ;
+  GST_WARNING_OBJECT(object,
+	"Setting property %s, value=%u \n",gst_element_get_name(GST_ELEMENT(object)), prop_id) ;
 
   switch (prop_id) {
     case PROP_SILENT:
       filter->silent = g_value_get_boolean (value);
       break;
     case PROP_DCV_EXEC_FN:
-      filter->execFn = g_value_get_pointer(value) ;
+	{
+		gst_dcv_stage_t *pf = (gst_dcv_stage_t *)g_value_get_pointer(value) ;
+      		filter->execFn.sf = pf->sf ;
+	}
       break ;
     case PROP_DCV_MODE:
       filter->grcvrMode = g_value_get_int(value) ;
+      break ;
+    case PROP_EOS_FWD:
+      filter->eosFwd = g_value_get_boolean(value) ;
       break ;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -459,10 +468,14 @@ gst_dcv_get_property (GObject * object, guint prop_id,
       g_value_set_boolean (value, filter->silent);
       break;
     case PROP_DCV_EXEC_FN :
-      g_value_set_pointer(value, filter->execFn) ;
+      g_value_set_pointer(value, &filter->execFn) ;
       break ; 
     case PROP_DCV_MODE:
       g_value_set_int(value,filter->grcvrMode) ;
+      break ;
+    case PROP_EOS_FWD:
+      g_value_set_boolean (value, filter->eosFwd);
+	break ;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -470,6 +483,14 @@ gst_dcv_get_property (GObject * object, guint prop_id,
 }
 
 /* GstElement vmethod implementations */
+
+static gchar *dcvGetQueueStatus(Gstdcv *dcv)
+{
+	static gchar outbuff[1024] ;
+	gchar *pout = outbuff;
+	sprintf(outbuff,"") ;
+	return pout;
+}
 
 /* this function handles sink events */
 static gboolean
@@ -496,7 +517,18 @@ gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       break;
     }
     case GST_EVENT_EOS:
-	return gst_pad_event_default(pad,parent,event) ;
+	GST_LOG_OBJECT(parent,"Received EOS:%s", dcvGetQueueStatus(filter)) ;
+	if (!filter->eosFwd)
+	{
+		GST_ERROR_OBJECT(parent,"EOS received (vq=%u dq=%u oq=%u)\n", 
+				g_queue_get_length(filter->Q.videoframequeue.bufq), 
+				g_queue_get_length(filter->Q.olddataqueue.bufq),
+				g_queue_get_length(filter->Q.dataqueue.bufq)) ;
+		ret= gst_pad_event_default(pad,parent,event) ;
+	}
+	else
+		ret = gst_pad_event_default(pad,parent,event) ;
+	break ;
     default:
       ret = gst_pad_event_default (pad, parent, event);
       break;
@@ -508,19 +540,53 @@ gst_dcv_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
  * this function does the actual processing
  */
 static GstFlowReturn
+gst_dcv_process_videoBuffers (GstPad * pad, GstObject * parent, GstBuffer ** lbuf, int nb)
+{
+  guint i;
+  GstBuffer *buf ;
+  GstFlowReturn retval = GST_FLOW_OK ;
+  Gstdcv *filter = GST_DCV(parent);
+  dcv_bufq_loc_t ld ;
+  ld.pD = &(filter->Q.videoframequeue) ;
+  ld.caps = gst_pad_get_current_caps(pad) ;
+
+  if (filter->silent == FALSE)
+  {
+    GST_DEBUG_OBJECT (parent,"DCV Video frame rx: (%d) ", filter->dcvVideoRx) ;
+    if (filter->dcvVideoRx == 0)
+	GST_DEBUG_OBJECT (parent,"caps %s\n",gst_caps_to_string(ld.caps));
+    else
+	GST_DEBUG_OBJECT (parent,"\n") ;
+  }
+  filter->dcvVideoRx++ ;
+  filter->vcaps = ld.caps ;
+  for (i=0; i<nb; i++) {
+	buf = lbuf[i] ;
+        if (sink_pushbufferToQueue(buf,&ld) ) {
+  		  dcvProcessQueuesDcv(filter) ;
+  		retval =  GST_FLOW_OK ;
+  	} else {
+	  retval =  GST_FLOW_ERROR;
+	  break ;
+  	}
+  }
+  return retval ;
+}
+
+static GstFlowReturn
 gst_dcv_chain_list_video(GstPad *pad, GstObject *parent, GstBufferList *buf)
 {
 	guint i,numBuffers = gst_buffer_list_length(buf) ;
 	GstFlowReturn rv = GST_FLOW_OK ;
-	g_print ("DCV Video buffer list received: %d buffers\n",numBuffers) ;
+	GST_DEBUG_OBJECT (parent,"DCV Video buffer list received: %d buffers\n",numBuffers) ;
 	GST_OBJECT_LOCK(parent) ;
-	for (i=0; i<numBuffers;i++) {
-		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
-		rv = gst_dcv_chain_video(pad,parent,nb) ;
-		g_assert (rv != GST_FLOW_OK) ;
-	} 
-	if (rv == GST_FLOW_OK) 
-		gst_buffer_list_unref(buf) ;
+	if (numBuffers > 0) {
+		GstBuffer **lbuf = g_newa(GstBuffer *,numBuffers) ;
+		for (i=0; i<numBuffers;i++) {
+			lbuf[i] = gst_buffer_list_get(buf,i) ;
+		}	 
+        	rv = gst_dcv_process_videoBuffers(pad,parent,lbuf,i) ;
+	}
 	GST_OBJECT_UNLOCK(parent) ;
 	return rv;
 }
@@ -529,29 +595,18 @@ static GstFlowReturn
 gst_dcv_chain_video (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
   Gstdcv *filter = GST_DCV(parent);
-  GstFlowReturn retval ;
+  GstFlowReturn rv ;
   dcv_bufq_loc_t ld ;
+
+
+	//GST_OBJECT_LOCK(parent) ;
   ld.pD = &(filter->Q.videoframequeue) ;
-  ld.caps = gst_pad_get_current_caps(pad) ;
+  GstBuffer *lbuf[1] ;
+	lbuf[0] = buf ;
 
-  if (filter->silent == FALSE)
-  {
-    g_print ("DCV Video frame rx: (%d) ", filter->dcvVideoRx) ;
-    if (filter->dcvVideoRx == 0)
-	g_print ("caps %s\n",gst_caps_to_string(ld.caps));
-    else
-	g_print ("\n") ;
-  }
-  filter->dcvVideoRx++ ;
-  filter->vcaps = ld.caps ;
-
-  if (sink_pushbufferToQueue(buf,&ld) ) {
-	  dcvProcessQueuesDcv(filter) ;
-  	retval =  GST_FLOW_OK ;
-  } else {
-	  retval =  GST_FLOW_ERROR;
-  }
-  return retval ;
+  rv = gst_dcv_process_videoBuffers(pad,parent,lbuf,1) ;
+	//GST_OBJECT_UNLOCK(parent) ;
+  return rv;
 }
 
 static GstFlowReturn
@@ -559,7 +614,7 @@ gst_dcv_chain_list_gst(GstPad *pad, GstObject *parent, GstBufferList *buf)
 {
 	guint i,numBuffers = gst_buffer_list_length(buf) ;
 	GstFlowReturn rv = GST_FLOW_OK ;
-	g_print ("DCV Gst buffer list received: %d buffers\n",numBuffers) ;
+	GST_DEBUG_OBJECT (parent,"DCV Gst buffer list received: %d buffers\n",numBuffers) ;
         GST_OBJECT_LOCK(parent) ;
 	for (i=0; i<numBuffers;i++) {
 		GstBuffer *nb = gst_buffer_list_get(buf,i) ;
@@ -582,9 +637,9 @@ gst_dcv_chain_gst (GstPad * pad, GstObject * parent, GstBuffer * buf)
 
   if (filter->silent == FALSE)
   {
-    g_print ("DCV Data frame rx: (%d) (mode=%d) ", filter->dcvDataRx, filter->grcvrMode) ;
-    if (filter->dcvDataRx == 0) g_print("caps %s\n",gst_caps_to_string(ld.caps));
-    else g_print("\n") ;
+    GST_DEBUG_OBJECT (parent,"DCV Data frame rx: (%d) (mode=%d) ", filter->dcvDataRx, filter->grcvrMode) ;
+    if (filter->dcvDataRx == 0) GST_DEBUG_OBJECT(parent,"caps %s\n",gst_caps_to_string(ld.caps));
+    else GST_DEBUG_OBJECT(parent,"\n") ;
   }
   filter->dcaps = ld.caps ;
   filter->dcvDataRx++ ;

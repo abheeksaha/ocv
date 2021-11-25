@@ -85,7 +85,7 @@
 #define CV_GST_FORMAT(format) (format)
 
 
-int dcvOptDebug = 0;
+int dcvOptDebug = 1;
 #ifdef FOE
 #include "foe.hpp"
 #else
@@ -520,33 +520,42 @@ int stagen(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outda
 {
 	vector<uchar> status;
 	vector<float> err;
-    	static vector<cv::Point2f> pointsg;
+    	vector<cv::Point2f> pointsg(pointsize);
     	cv::Size subPixWinSize(10,10), winSize(31,31);
 	static cv::Mat gray(img);
 	static cv::Mat prevGray(img) ;
 	static cv::Mat rdm(img) ;
-	int nitems;
+	int nitems=0;
 	int i,size=0;
 	const int MAX_COUNT = 500 ;
 	static int fno=0;
 	
+#if 0
         cvtColor(img, gray, cv::COLOR_BGR2GRAY);
 	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, rdm, 3, 3, 0, 0.04);
 	cornerSubPix(gray, pointsg, subPixWinSize, cv::Size(-1,-1), termcrit);
-#if 0
 #endif
+	if (pointsize >0 && ( (nitems = readFromBuffer(pointlist,pointsize, pointsg)) == -1)) {
+	       g_print("Read from buffer failed\n")	;
+	       return 0 ;
+	}
+	else 
+		g_print("Stagen: Read %u from buffer", nitems) ;
+#if 0
         for( i = 0; i < pointsg.size(); i++ )
         {
               circle( img, pointsg[i], 4, cv::Scalar(128,128,0), -1, 8);
         }
 	cv::putFrameNum(img, ++fno) ;
+#endif
+	GST_DEBUG("Stagen: pointlist=%p, number of points=%u\n",pointlist,pointsize) ;
 	size = 0 ;
-	//size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
-	if (dcvOptDebug) g_print("Stagen:return %d bytes\n",size) ;
+	size = writeToArray(pointsg, (char *)dataout, outdatasize) ;
+	GST_DEBUG("Stagen:return %d bytes\n",size) ;
 //imshow...	
 	return size;
 }
-int stage2(cv::Mat img, void *pointlist, int size, void *dataout, int outdatasize)
+int stage2(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outdatasize)
 {
 	vector<uchar> status;
 	vector<float> err;
@@ -561,7 +570,7 @@ int stage2(cv::Mat img, void *pointlist, int size, void *dataout, int outdatasiz
 	if (points[1].size() == 0) 
 		points[1].resize(500) ;
         cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
+	if (pointsize >0 && ( (nitems = readFromBuffer(pointlist,pointsize, points[1])) == -1)) {
 //	if (size >0 && ( (nitems = readFromBuffer(pointlist,size, points[1])) == -1)) {
 	       g_print("Read from buffer failed\n")	;
 	       return -1 ;
@@ -630,7 +639,8 @@ int stage2(cv::Mat img, void *pointlist, int size, void *dataout, int outdatasiz
 /** Main platform functions **/
 #define MAXSTAGEDATASIZE 16384
 extern "C" 
-GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb)
+
+GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, dcvStageFn_t stage, GstBuffer **newvb, grcvr_mode_e grcvrMode)
 {
         int *imgdata ;
 	gboolean res  ;
@@ -655,12 +665,16 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 		{
 			char *op = odmap.data ;
 			op += getTagSize() ;
-			size  = stage(*img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
+			g_print("Calling stage function with op = %p size=%u\n",op,odmap.size - getTagSize()) ;
+			if (grcvrMode == GRCVR_INTERMEDIATE)
+				size = stagen(*img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
+			else 
+				size  = stage(*img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
 			gst_memory_unmap(odmem,&odmap) ;
 		}
 	}
 	else {
-		size = stage(*img,NULL,NULL, opdata,MAXSTAGEDATASIZE) ;
+		size = stage(*img,NULL,0, opdata,MAXSTAGEDATASIZE) ;
 	}
 	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
 	

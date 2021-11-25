@@ -43,6 +43,7 @@
 #include <stdio.h>
 #include "gstr3psrc.h"
 #include "tcptrans.h"
+#include "rseq.h"
 
 GST_DEBUG_CATEGORY_STATIC (r3psrc_debug);
 #define GST_CAT_DEFAULT r3psrc_debug
@@ -156,6 +157,13 @@ gst_r3p_src_init (GstR3PSrc * src)
   src->server_socket = NULL;
   src->client_socket = NULL;
   src->cancellable = g_cancellable_new ();
+  /* configure basesrc to be a live source */
+  gst_base_src_set_live (GST_BASE_SRC (src), TRUE);
+  /* make basesrc output a segment in time */
+  gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
+  /* make basesrc set timestamps on outgoing buffers based on the running_time
+   * when they were captured */
+  gst_base_src_set_do_timestamp (GST_BASE_SRC (src), TRUE);
 
   GST_OBJECT_FLAG_UNSET (src, GST_R3P_SRC_OPEN);
 }
@@ -191,6 +199,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   GError *err = NULL;
   GstMapInfo map;
 
+  GST_OBJECT_LOCK(G_OBJECT(psrc)) ;
   src = GST_R3P_SRC (psrc);
 
   if (!GST_OBJECT_FLAG_IS_SET (src, GST_R3P_SRC_OPEN))
@@ -198,7 +207,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
 
   if (!src->client_socket) {
     /* wait on server socket for connections */
-   g_print("Going into accept mode\n") ;
+   GST_INFO_OBJECT(src,"Going into accept mode\n") ;
     src->client_socket =
         g_socket_accept (src->server_socket, src->cancellable, &err);
     if (!src->client_socket)
@@ -249,27 +258,27 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   }
 
   if (avail > 0) {
-	g_assert(avail >= 14) ;
-	char hdr[14] ;
+	char hdr[15] ;
 	int tlen,nread ;
 	rret = g_socket_receive(src->client_socket,hdr,14,NULL,&src->err) ;
-	if (rret < 14)
+	if (rret < 8)
 		goto get_available_error ;
 	if ( (nread = sscanf(hdr,"RCV MSG %5d\n",&tlen)) < 1) 
 	{
-		g_print("Unknown message %s\n",hdr) ;
+		GST_ERROR_OBJECT(src,"Unknown message %s\n",hdr) ;
 		goto get_available_error;
 	}
-	g_print("Preparing to receive message of size %d\n",tlen) ;
+	GST_LOG_OBJECT(src,"Preparing to receive message of size %d\n",tlen) ;
     	*outbuf = gst_buffer_new_and_alloc (tlen);
 	gst_buffer_map (*outbuf, &map, GST_MAP_READWRITE);
 
+	usleep(500) ;
 	if (g_socket_send(src->client_socket, "OK", 3,NULL, &src->err) != 3){
-			g_print("Couldn't send ok message\n") ;
+			GST_ERROR_OBJECT(src,"Couldn't send ok message\n") ;
 			goto get_available_error ;
 	}
 	rret = g_socket_receive_with_blocking(src->client_socket,(gchar *)map.data,tlen,TRUE,src->cancellable,&err) ;
-	g_print("Received %d bytes\n",rret) ;
+	GST_LOG_OBJECT(src,"Received %d bytes\n",rret) ;
 #if 0
     read = MIN (avail, MAX_READ_SIZE);
     *outbuf = gst_buffer_new_and_alloc (read);
@@ -310,7 +319,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
     gst_buffer_unmap (*outbuf, &map);
     gst_buffer_resize (*outbuf, 0, rret);
 
-    GST_LOG_OBJECT (src,
+    GST_DEBUG_OBJECT (src,
         "Returning buffer from _get of size %" G_GSIZE_FORMAT ", ts %"
         GST_TIME_FORMAT ", dur %" GST_TIME_FORMAT
         ", offset %" G_GINT64_FORMAT ", offset_end %" G_GINT64_FORMAT,
@@ -322,6 +331,7 @@ gst_r3p_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   g_clear_error (&err);
 
 done:
+  GST_OBJECT_UNLOCK(G_OBJECT(psrc)) ;
   return ret;
 
 wrong_state:
@@ -484,12 +494,12 @@ gst_r3p_src_start (GstBaseSrc * bsrc)
 
   if ( (sl = g_socket_listen (src->server_socket, &err)) == FALSE)
   {
-	g_print("Listen failed!!!: %s\n",err->message) ;
+	GST_ERROR_OBJECT(src,"Listen failed!!!: %s\n",err->message) ;
 	g_assert(sl == TRUE) ;
     goto listen_failed;
   }
   else {
-	g_print("Exited listening!\n") ;
+	GST_LOG_OBJECT(src,"Exited listening!\n") ;
   }
 
   GST_OBJECT_FLAG_SET (src, GST_R3P_SRC_OPEN);

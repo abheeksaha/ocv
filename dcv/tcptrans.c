@@ -1,6 +1,7 @@
 #include <stdio.h> 
 #include <stdlib.h> 
 #include <string.h> 
+#include <glib.h>
 #include <unistd.h>
 #include <sys/socket.h> 
 #define MAX 80 
@@ -54,7 +55,7 @@ int writeConfirmWithTimeout(int sockfd, char *msg, int mlen, int toutmsec)
 		return -1 ;
 	}
 	do {
-		hdrsize = getMsgWithTimeout(sockfd,hdr,2048,500,0) ;
+		hdrsize = getMsgWithTimeout(sockfd,hdr,2048,toutmsec,0) ;
 	} while (hdrsize == 0) ;
 	if (hdrsize == -1) return -1 ;
 
@@ -95,7 +96,7 @@ int readConfirmWithTimeout(int sockfd, char **msg, int toutmsec)
 
 	if ( (nread = sscanf(hdr,"Receive msg of size %d\n",&tlen)) >= 1){ 
 		printf("Preparing to receive message of size %d\n",tlen) ;
-		*msg = calloc(tlen,sizeof(char)) ;
+		*msg = g_new0(char,tlen) ;
 		if (*msg == NULL) {
 			return -1 ;
 		}
@@ -105,7 +106,7 @@ int readConfirmWithTimeout(int sockfd, char **msg, int toutmsec)
 			fprintf(stderr,"Couldn't send ok message\n") ;
 			return -1 ;
 		}
-		if ((mlen = getMsgWithTimeout(sockfd,*msg,tlen,500,1)) != tlen) {
+		if ((mlen = getMsgWithTimeout(sockfd,*msg,tlen,toutmsec,1)) != tlen) {
 			return -1 ;
 		}
 		printf("Received %d bytes from client\n",mlen) ;

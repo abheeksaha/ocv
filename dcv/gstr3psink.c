@@ -196,11 +196,15 @@ gst_r3p_sink_render_list(GstBaseSink *bsink, GstBufferList *lbuf)
 	for (i=0; i<numBuffers;i++) {
 		GstBuffer *nb = gst_buffer_list_get(lbuf,i) ;
 		rv = gst_r3p_sink_render(bsink,nb) ;
+		if (rv != GST_FLOW_OK) {
+  			GST_LOG_OBJECT (bsink, "Render failed for buffer %u, retval=%d",i,rv);
+			break ;
+		}
+			
 	} 
-	if (rv == GST_FLOW_OK) 
-		gst_buffer_list_unref(lbuf) ;
+  	GST_LOG_OBJECT (bsink, "Rendered %u buffers from list (numbuffers=%u)",i,numBuffers);
 	GST_OBJECT_UNLOCK(GST_OBJECT(bsink)) ;
-	g_assert (rv != GST_FLOW_OK) ;
+	g_assert (rv == GST_FLOW_OK) ;
 	return rv;
 }
 
@@ -210,7 +214,7 @@ gst_r3p_sink_render (GstBaseSink * bsink, GstBuffer * buf)
   GstR3PSink *sink;
   GstMapInfo map;
   gsize written = 0;
-  gssize rret;
+  gssize rret = 0;
   GError *err = NULL;
 
   sink = GST_R3P_SINK (bsink);
@@ -234,9 +238,9 @@ gst_r3p_sink_render (GstBaseSink * bsink, GstBuffer * buf)
 #endif
   g_assert(map.size <= 99999) ;
   {
-	char hdr[14] ;
-	sprintf(hdr,"RCV MSG %5d\n",map.size) ;
-	if ((rret = g_socket_send(sink->socket,hdr,14,sink->cancellable,&err)) != 14) {
+	char hdr[15] ;
+	sprintf(hdr,"RCV MSG %d\n",map.size) ;
+	if ((rret = g_socket_send(sink->socket,hdr,strlen(hdr),sink->cancellable,&err)) != 14) {
 		rret = -1;
 	}
 	if (err != NULL) g_error_free(err) ;
@@ -244,18 +248,25 @@ gst_r3p_sink_render (GstBaseSink * bsink, GstBuffer * buf)
 		rret = -1 ;
 	}
 	if (err != NULL) g_error_free(err) ;
+  	if (rret < 0)
+      		goto get_out;
 	while (written < map.size && rret >= 0) {
     		rret = g_socket_send (sink->socket, (gchar *) map.data + written,
         		map.size - written, sink->cancellable, &err);
     		if (rret < 0)
 		{
-			g_print("Socket send error:%s\n",err->message) ;
+			GST_ERROR_OBJECT(sink,"Socket send error:%s\n",err->message) ;
 		}
 		else 
     			written += rret;
 		if (err != NULL) g_error_free(err) ;
 	}
   }
+
+get_out:
+  {
+  GST_LOG_OBJECT (sink, "written %" G_GSIZE_FORMAT " bytes for buffer data, ret=%d", written,rret);
+
   gst_buffer_unmap (buf, &map);
   if (rret < 0)
       goto write_error;
@@ -263,7 +274,9 @@ gst_r3p_sink_render (GstBaseSink * bsink, GstBuffer * buf)
 
   sink->data_written += written;
 
+  GST_LOG_OBJECT (sink, "written in total %" G_GSIZE_FORMAT " bytes for buffer data", sink->data_written);
   return GST_FLOW_OK;
+  }
 
   /* ERRORS */
 write_error:
@@ -278,6 +291,8 @@ write_error:
           (("Error while sending data to \"%s:%d\"."), sink->host, sink->port),
           ("Only %" G_GSIZE_FORMAT " of %" G_GSIZE_FORMAT " bytes written: %s",
               written, map.size, err->message));
+	GST_DEBUG_OBJECT( sink, "Error while sending data to %s:%d err=%s\n", 
+		sink->host, sink->port,err->message);
       ret = GST_FLOW_ERROR;
     }
     gst_buffer_unmap (buf, &map);

@@ -17,7 +17,7 @@
 
 bufferCounter_t inbc,outbc;
 extern gboolean terminate ;
-int dcvGstDebug = 1 ;
+int dcvGstDebug = 0 ;
 int strictCheck = 0;
 
 #define true 1
@@ -135,7 +135,10 @@ int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d, tag_t *T)
 		if (dcvGstDebug) g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T->count,T->tstmp,T->seqsize) ;
 
 		if ((p = g_queue_find_custom(q,(void *)T,dcvMatchContainer)) == NULL) 
+		{
 			rval = -1 ;
+			g_print("No match found\n") ;
+		}
 		else
 			rval =  g_queue_link_index(q,p) ;
 		gst_memory_unmap(tmem, &tmap) ;
@@ -193,11 +196,11 @@ int dcvBufQInit(dcv_bufq_t *P)
 	P->entries = 0;
 }
 
-GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb)
+GstBuffer * dcvProcessFn(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcvFrameData_t *df, gpointer execFn, GstBuffer **newvb, grcvr_mode_e mode)
 {
 	gst_dcv_stage_t *F = (gst_dcv_stage_t *)execFn ;
 	if (F != NULL)
-		return dcvProcessStage(vbuf,gcaps,dbuf,df,F->sf,newvb) ;
+		return dcvProcessStage(vbuf,gcaps,dbuf,df,F->sf,newvb,mode) ;
 	else 
-		return dcvProcessStage(vbuf,gcaps,dbuf,df,NULL,newvb) ;
+		return dcvProcessStage(vbuf,gcaps,dbuf,df,NULL,newvb,mode) ;
 }

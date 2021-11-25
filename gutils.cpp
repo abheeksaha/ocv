@@ -258,11 +258,14 @@ int dcvFindMatchingContainer(GQueue *q, dcv_BufContainer_t *d, tag_t *T)
 		tmem = gst_buffer_get_all_memory(d->nb) ;
 		if (gst_memory_map(tmem, &tmap, GST_MAP_READ) != TRUE) { g_printerr("Couldn't map memory in vbuffer\n") ; }
 		memcpy((void *)T,tmap.data,sizeof(tag_t)) ;
-		g_print("Recevied Tag:count=%u tstmp=%u \n ", T->count,T->tstmp) ;
+		g_print("Received Tag:count=%u tstmp=%u \n ", T->count,T->tstmp) ;
 		if (dcvGstDebug) g_print("Preparing to find matching container for count=%u tstmp=%u seqsize=%u\n",T->count,T->tstmp,T->seqsize) ;
 
 		if ((p = g_queue_find_custom(q,(void *)T,dcvMatchContainer)) == NULL) 
+		{
 			rval = -1 ;
+			g_print("No matching container\n ", T->count,T->tstmp) ;
+		}
 		else
 			rval =  g_queue_link_index(q,p) ;
 		gst_memory_unmap(tmem, &tmap) ;
