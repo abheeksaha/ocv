@@ -77,7 +77,6 @@ tpoint.src_1 ! queue ! fakesink" ;
 gboolean dcvQueuesLoaded(dpipe_t *pD, grcvr_mode_e grcvrMode) ;
 int dcvPushToSink(dpipe_t *pD) ;
 extern bufferCounter_t inbc,outbc;
-extern int dcvFtcDebug;
 extern int dcvGstDebug;
 int main( int argc, char** argv )
 {
@@ -111,7 +110,7 @@ int main( int argc, char** argv )
 		{ 0,0,0,0 }} ;
 	int longindex;
 
-	dcvFtcDebug = dcvGstDebug = 0 ;
+	dcvGstDebug = 0 ;
 	Dv.num_frames = 0;
 	Dv.avgProcessTime = 0;
 
@@ -136,9 +135,8 @@ int main( int argc, char** argv )
 				g_print("optarg=%s\n",optarg) ; dbgFlags = atoi(optarg) ;
 			}
 			else { g_print("\n") ; dbgFlags = DBG_DEFAULT ;  }
-			dcvFtcDebug = (dbgFlags & DBG_FTC_MASK) ;
 			dcvGstDebug = ((dbgFlags >> 2) & DBG_FTC_MASK) ;
-			g_print("dcvFtcDebug is set to %d, dcvGstDebug is set to %d\n",dcvFtcDebug,dcvGstDebug) ;
+			g_print("dcvGstDebug is set to %u\n",dcvGstDebug) ;
 		}
 		else if (ch == 'i') { strcpy(ipaddress,optarg) ; }
 		else if (ch == 'p') { txport = atoi(optarg) ; }
@@ -278,7 +276,7 @@ int main( int argc, char** argv )
 			F.sf = stage2 ;
 		}
 		else {
-			F.sf = stage1 ;
+			F.sf = stagen ;
 		}
 		g_print("Setting execution function for %s\n",gst_element_get_name(D.dcv)) ;
 		g_value_init(&valueFn,G_TYPE_POINTER) ;
