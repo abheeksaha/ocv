@@ -85,7 +85,7 @@
 #define CV_GST_FORMAT(format) (format)
 
 
-int dcvOptDebug = 1;
+int dcvOptDebug = 0;
 #ifdef FOE
 #include "foe.hpp"
 #else
@@ -158,7 +158,8 @@ static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutput
     // bail out in no caps
     if (!GST_CAPS_IS_SIMPLE(frame_caps))
         return false;
-    if (dcvOptDebug) g_print("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
+    if (dcvOptDebug) 
+	g_print("Caps says: %s\n",gst_caps_to_string(frame_caps)) ;
 
     GstStructure* structure = gst_caps_get_structure(frame_caps, 0);  // no lifetime transfer
 
@@ -234,7 +235,8 @@ static gboolean determineFrameDims(Size *sz, gint* channels, gboolean * isOutput
     {
         CV_Error_(Error::StsNotImplemented, ("Unsupported GStreamer layer type: %s", name.c_str()));
     }
-    if (dcvOptDebug) g_print("Channels=%d sz.height=%d sz.width=%d\n",*channels,sz->height,sz->width) ;
+    if (dcvOptDebug) 
+	g_print("Channels=%d sz.height=%d sz.width=%d\n",*channels,sz->height,sz->width) ;
     return true;
 }
 
@@ -369,7 +371,6 @@ int writeToArray(vector<cv::Point2f> vlist, char *op, int opsize)
 	return tstep ;
 }
 
-#ifdef FOESTAGE
 int writeToArrayContours(vector<vector<cv::Point2f>> vlist, char *op, int opsize)
 {
 	char *pop = op ;
@@ -390,7 +391,6 @@ int writeToArrayContours(vector<vector<cv::Point2f>> vlist, char *op, int opsize
 	}
 	return it ;
 }
-#endif
 	
 //
 // Buffer format
@@ -425,7 +425,6 @@ int readFromBuffer(char *op,int sz, vector<cv::Point2f> & pvlist)
 	}
 	return it ;
 }
-#ifdef FOESTAGE
 int readFromBufferContours(char *op, int sz, vector <vector<cv::Point2f>> &pvlist)
 {
 	char *pop = op ;
@@ -454,7 +453,6 @@ int readFromBufferContours(char *op, int sz, vector <vector<cv::Point2f>> &pvlis
 	}
 	return it;
 }
-#endif
 	
 cv::Mat * frameToImg(GstBuffer *buf, GstCaps *caps, dcvFrameData_t *df)
 {
@@ -510,7 +508,8 @@ int stage1(cv::Mat img, void *dataIn, int insize, void * pointlist, int outdatas
 			//pointsg.resize(0) ;
 			size = writeToArray(pointsg, (char *)pointlist, outdatasize) ;
 		}
-		if (dcvOptDebug) g_print("Stage1:return %d bytes\n",size) ;
+		if (dcvOptDebug) 
+			g_print("Stage1:return %d bytes\n",size) ;
 
 	}
 	return size;
@@ -520,7 +519,7 @@ int stagen(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outda
 {
 	vector<uchar> status;
 	vector<float> err;
-    	vector<cv::Point2f> pointsg(pointsize);
+    	vector<cv::Point2f> pointsg;
     	cv::Size subPixWinSize(10,10), winSize(31,31);
 	static cv::Mat gray(img);
 	static cv::Mat prevGray(img) ;
@@ -530,18 +529,17 @@ int stagen(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outda
 	const int MAX_COUNT = 500 ;
 	static int fno=0;
 	
-#if 0
-        cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, rdm, 3, 3, 0, 0.04);
-	cornerSubPix(gray, pointsg, subPixWinSize, cv::Size(-1,-1), termcrit);
-#endif
 	if (pointsize >0 && ( (nitems = readFromBuffer(pointlist,pointsize, pointsg)) == -1)) {
 	       g_print("Read from buffer failed\n")	;
 	       return 0 ;
 	}
 	else 
-		g_print("Stagen: Read %u from buffer", nitems) ;
+		if (dcvOptDebug) 
+			g_print("Stagen: Read %u from buffer", nitems) ;
 #if 0
+        cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+	goodFeaturesToTrack(gray, pointsg, MAX_COUNT, 0.01, 10, rdm, 3, 3, 0, 0.04);
+	cornerSubPix(gray, pointsg, subPixWinSize, cv::Size(-1,-1), termcrit);
         for( i = 0; i < pointsg.size(); i++ )
         {
               circle( img, pointsg[i], 4, cv::Scalar(128,128,0), -1, 8);
@@ -575,14 +573,18 @@ int stage2(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outda
 	       g_print("Read from buffer failed\n")	;
 	       return -1 ;
 	}
-	else if (nitems == 0) if (dcvOptDebug) g_print("No new points, please carry on using old points\n") ;
+	else if (nitems == 0) {
+		if (dcvOptDebug) 
+			g_print("No new points, please carry on using old points\n") ;
+	}
 	if (!points[0].empty())
         {
 		if(prevGray.empty())
 			img.copyTo(prevGray);
             calcOpticalFlowPyrLK(prevGray, gray, points[0], points[1], status, err, winSize,
                                  3, termcrit, 0, 0.001);
-	    if (dcvOptDebug) g_print("Optical flow computed\n") ;
+	    if (dcvOptDebug) 
+		g_print("Optical flow computed\n") ;
             size_t i, k;
             for( i = k = 0; i < points[1].size(); i++ )
             {
@@ -627,7 +629,8 @@ int stage2(cv::Mat img, void *pointlist, int pointsize, void *dataout, int outda
 	cv::putFrameNum(img,++fno) ;
 	if (dataout != NULL) {
 		osize = writeToArrayContours(points,dataout,outdatasize) ;
-		g_print("Stage 2 returns %d bytes\n",osize) ;
+		if (dcvOptDebug) 
+			g_print("Stage 2 returns %d bytes\n",osize) ;
 	}
 //imshow...	
 	swap(points[1], points[0]);
@@ -647,7 +650,8 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 	char opdata[MAXSTAGEDATASIZE] ;
 	int size;
 	GstBuffer *newdb = NULL ;
-	g_print("In DCV Process Stage:\n") ;
+	if (dcvOptDebug) 
+		g_print("In DCV Process Stage:\n") ;
 	cv::Mat * img = (cv::Mat *)frameToImg(vbuf,gcaps,df) ;
 	if (img == NULL) {
 		printf("Something went wrong extracting image\n") ;
@@ -665,10 +669,11 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 		{
 			char *op = odmap.data ;
 			op += getTagSize() ;
-			g_print("Calling stage function with op = %p size=%u\n",op,odmap.size - getTagSize()) ;
+#if 0
 			if (grcvrMode == GRCVR_INTERMEDIATE)
 				size = stagen(*img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
 			else 
+#endif
 				size  = stage(*img,op,odmap.size - getTagSize(),opdata,MAXSTAGEDATASIZE) ;
 			gst_memory_unmap(odmem,&odmap) ;
 		}
@@ -676,7 +681,8 @@ GstBuffer * dcvProcessStage(GstBuffer *vbuf, GstCaps *gcaps, GstBuffer *dbuf,dcv
 	else {
 		size = stage(*img,NULL,0, opdata,MAXSTAGEDATASIZE) ;
 	}
-	if (dcvOptDebug) g_print("Stage fn writes %d bytes\n",size) ;
+	if (dcvOptDebug) 
+		g_print("Stage fn writes %d bytes\n",size) ;
 	
 	if (size > 0)
 	{

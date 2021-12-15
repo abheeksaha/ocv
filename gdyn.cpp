@@ -59,7 +59,6 @@ typedef struct {
 	dcv_bufq_t dq;
 } dpipe_t ;
 
-extern int dcvFtcDebug;
 extern int dcvGstDebug;
 #include <getopt.h>
 #include <signal.h>
@@ -180,7 +179,6 @@ int main( int argc, char** argv )
 		{ "graphdump", required_argument, 0, 'G' },
 		{ 0,0,0,0 }} ;
 	int longindex;
-	dcvFtcDebug=0 ;
 	dcvGstDebug=0 ;
 	char * ip_address=NULL;
 
@@ -196,7 +194,7 @@ int main( int argc, char** argv )
 		if (ch == 'f') { strcpy(videofile, optarg) ;  }
 		if (ch == 'n') { inputfromnet=TRUE; rxport = atoi(optarg) ;  }
 		if (ch == 'l') { localdisplay=TRUE;  }
-		if (ch == 'd') { dcvFtcDebug = atoi(optarg) & 0x03 ; dcvGstDebug = (atoi(optarg) >> 2) & 0x03 ;  }
+		if (ch == 'd') { dcvGstDebug = (atoi(optarg) >> 2) & 0x03 ;  }
 		if (ch == 'e')
                 {
 			intel_platform=TRUE;
@@ -361,30 +359,6 @@ int main( int argc, char** argv )
 		gst_object_unref (D.pipeline);
 		return -1;
 	}
-#if 0
-	if (D.dsrc) {
-	ret = gst_element_set_state(GST_ELEMENT_CAST(D.dsrc),GST_STATE_PLAYING) ;
-	if (ret == GST_STATE_CHANGE_FAILURE) {
-		g_print ("Unable to set data src to the playing state.\n");
-		return -1;
-	}
-	}
-	if (D.vsink) {
-	if ( ( ret = gst_element_set_state(GST_ELEMENT_CAST(D.vsink),GST_STATE_PLAYING)) == GST_STATE_CHANGE_FAILURE)
-	{
-		g_print("Couldn't set vsink state to playing\n") ;
-		return -1;
-	}
-	}
-
-	if (D.vdisp) {
-	if ( ( ret = gst_element_set_state(GST_ELEMENT_CAST(D.vdisp),GST_STATE_PLAYING)) == GST_STATE_CHANGE_FAILURE)
-	{
-		g_print("Couldn't set vdisp state to playing\n") ;
-		return -1;
-	}
-	}
-#endif
 
 	GstState oldstate,newstate=GST_STATE_NULL ;
 	terminate = FALSE ;
@@ -440,12 +414,6 @@ int main( int argc, char** argv )
 			}
 
 		}
-#if 0
-			if (++notprocessed == 5) {
-				if (dcvGstDebug & 0x02 == 0x02) g_print("External:newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
-				notprocessed = 0 ;
-			}
-#endif
 		if  (D.eos[EOS_VSINK] == true) {
 			if (eosstage == 0)
 				g_print("Received eos on vsink.newstate=%d dsrcstate = %d queue=%d",newstate,D.dsrcstate.state,g_queue_get_length(D.dq.bufq)) ;
@@ -453,7 +421,6 @@ int main( int argc, char** argv )
 			{
 				eosstage++ ;
 				g_print("Received eos on vsink... and all clear\n") ;
-				dcvFtcDebug = 3 ;
 			}
 			if (D.dsrcstate.state != G_WAITING) continue ;
 			else if (D.eos[EOS_USRC] == false && D.eosSent[EOS_USRC] == false)

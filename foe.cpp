@@ -1,12 +1,16 @@
-#include <stdio.h>
+# include <stdio.h>
 #include <math.h>
 #include <gsl/gsl_vector.h>
 
+#include "opencv2/video/tracking.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include "opencv2/highgui.hpp"
 #include "precomp.hpp"
 #include <opencv2/imgproc.hpp>
 #include "foe.hpp"
 #include <gst/gst.h>
-#include "dsopencv.hpp"
+//#include "dsopencv.hpp"
 
 int foeDebug ;
 using namespace cv;
@@ -65,7 +69,7 @@ double foeDistVal(const gsl_vector *x, void *params)
 	p.x = gsl_vector_get(x,0) ;
 	p.y = gsl_vector_get(x,1);
 	for (ctr=0; ctr<s->n; ctr++) {
-		rv += pow(foeDistanceLine(p,s->line[ctr]),2.0) ;
+		rv += pow(foeDistanceLine(p,s->line[ctr]),2.0)/(double)(s->n) ;
 	}
 	if (foeDebug) printf("Distance Value:%.4g\n",rv) ;
 	return rv;
@@ -116,7 +120,7 @@ void foeDistCombined(const gsl_vector *x, void *params, double *rv, gsl_vector *
 	return;
 }
 
-#define MINDISTANCE 1
+#define MINDISTANCE 1.00000001
 #define MAXLINES 512
 #include <gsl/gsl_multimin.h>
 int lineCompare(void *la, void *lb)
@@ -150,8 +154,8 @@ gsl_multimin_function_fdf * foeEstimatorInit(int nPoints, vector<Point2f> pts, v
 				selector[it] = 0 ;
 		}
 	}
-	if (foeDebug) { printf("Selected %d points out of a total of %d\n",npts,nPoints); } ;
-	if (npts < 5) return NULL ;
+	printf("Selected %d points out of a total of %d\n",npts,nPoints); 
+	if (npts < 2) return NULL ;
 
 	gsl_multimin_function_fdf *f = (gsl_multimin_function_fdf *)malloc(sizeof(gsl_multimin_function_fdf)) ;
 	f->n = 2;
@@ -180,7 +184,7 @@ gsl_multimin_function_fdf * foeEstimatorInit(int nPoints, vector<Point2f> pts, v
 	return f ;
 }
 
-Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> pred, int width, int height) 
+Point2f foeEstimate(int nPoints, vector<Point2f> pts, vector<Point2f> pred, int width, int height) 
 {
 	gsl_multimin_function_fdf *foeMM = foeEstimatorInit(nPoints, pts, pred) ;
 	gsl_multimin_fdfminimizer *s;
@@ -210,20 +214,21 @@ Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> p
 		status = gsl_multimin_fdfminimizer_iterate (s);
 		if (status)
 		{
-			printf("Failure in minimization!\n") ;
-			break;
+			printf("Failure in minimization:error code=%s!\n",gsl_strerror(status)) ;
+			iter = 100;
 		}
 
 		status = gsl_multimin_test_gradient (s->gradient, 1e-3);
 
+		printf ("Updated to: %5d %.5f %.5f %10.5f\n", 
+					iter, gsl_vector_get (s->x, 0), gsl_vector_get (s->x, 1), s->f);
 		if (status == GSL_SUCCESS)
 		{
 			printf ("Minimum found at: %5d %.5f %.5f %10.5f\n", 
 					iter, gsl_vector_get (s->x, 0), gsl_vector_get (s->x, 1), s->f);
-			rv.x = gsl_vector_get(s->x,0) ;
-			rv.y = gsl_vector_get(s->x,1) ;
 		}
 	} while (status == GSL_CONTINUE && iter < 100);
+#if 0
 	for (i=0; i<ls->n; i++)
 	{
             	int line_thickness = 4;
@@ -236,7 +241,9 @@ Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> p
 		q = ls->line[i].pt2 ;
 		line( img, p, q, line_color, line_thickness, 16 ,0 );   
 	}
-
+#endif
+	rv.x = gsl_vector_get(s->x,0) ;
+	rv.y = gsl_vector_get(s->x,1) ;
 	gsl_multimin_fdfminimizer_free (s);
 	gsl_vector_free (x);
 	return rv;
@@ -246,48 +253,110 @@ Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> p
 int foeDetectEdges(Mat image, char *op, int maxdata)
 {
 }
-int foeDetectContours(Mat & gray, char *op, int maxdata)
+int foeDetectContours(Mat & gray, vector<cntr_t>& cntrsdb, int fno, double * maxsize,double * minsize, int threshval)
 {
 	Mat gray2,cannyOp;
 	int i,j, tsize=0;
 	char *pop;
-	static vector < vector<Point>> refcntrs ;
-	vector < vector<Point>> cntrs, cntrs_s ;
+	vector <Vec4i> hierarchy ;
+	vector < vector<Point>> cntrs ;
 	int np,tpoints = 0;
 	int cthresh=100 ;
+	double Msz , msz ;
+	vector <Point> approx;
+	double c_area ;
+	int outsize=0;
+	Msz = msz = -1 ;
 
-	gray.convertTo(gray,CV_8UC1);
-	cvtColor(gray,gray,COLOR_BGR2GRAY) ;
-//    threshold(gray, gray, 128, 255, THRESH_BINARY);
-	Canny(gray, cannyOp,cthresh, cthresh*2) ;
-    findContours( cannyOp, cntrs, RETR_LIST, CHAIN_APPROX_SIMPLE );
+	gray.copyTo(gray2) ;
+	gray2.convertTo(gray2,CV_8UC1);
+	cvtColor(gray2,gray2,COLOR_BGR2GRAY) ;
+    	//threshold(gray2, cannyOp, threshval, 1, THRESH_BINARY);
+//	Canny(gray2, cannyOp,cthresh, cthresh*2) ;
+	adaptiveThreshold(gray2,cannyOp,1,ADAPTIVE_THRESH_GAUSSIAN_C,THRESH_BINARY,threshval,0) ;
+//    findContours( cannyOp, cntrs, hierarchy, RETR_CCOMP, CHAIN_APPROX_SIMPLE );
+    findContours( cannyOp, cntrs, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE );
     if (cntrs.empty()) cout << "No contours found\n" ;
-    else cout << cntrs.size() << " contours found\n" ;
-    if (refcntrs.size() == 0) {
-	    refcntrs.resize(cntrs.size()) ;
-	    for (i=0; i<cntrs.size(); i++) {
-		refcntrs[i] = cntrs[i] ;
+    else cout << cntrs.size() << " contours found: Existing contours: " << cntrsdb.size() << "\n" ;
+
+    if (cntrsdb.size() == 0) {
+	    int added=0;
+	    cntrsdb.resize(cntrs.size()) ;
+	    //for (i=0; i >= 0; i = hierarchy[i][0] ) {
+	//	if ((hierarchy[i][2] < 0 && hierarchy[i][3] < 0))
+	//		continue ;
+		for (i=0; i<cntrs.size(); i++) {
+		approxPolyDP(cntrs[i],approx,arcLength(cntrs[i], true)*0.02,true) ;
+		c_area = fabs(contourArea(approx,false)) ;
+		if ( (*maxsize != -1 && *minsize != -1) && 
+			(c_area > *maxsize || c_area < *minsize) )
+		{
+			outsize++ ;
+			continue ;
+		}
+//		printf("Adding contour of area %g Msz=%g msz = %g\n",c_area,Msz,msz) ;
+		if (Msz == -1 || c_area > Msz) Msz = c_area ;
+		else if (msz == -1 || c_area < msz) msz = c_area ;
+		cntrsdb[added].cntr = cntrs[i] ;
+		cntrsdb[added].fframe = fno ;
+		cntrsdb[added].lframe = fno ;
+		added++;
 	    }
-	    printf("Stored %d reference counters\n",refcntrs.size()) ;
+	   cntrsdb.resize(added) ;
+	    printf("Stored %u reference contours, %d contours eliminated due to size\n",cntrsdb.size(),outsize) ;
     }
     else {
 	    int elim=0;
 	    for (i=0; i<cntrs.size(); i++) {
 		    double mingap=10;
 		    int minpos = -1 ;
-		    for (j=0; j<refcntrs.size(); j++) {
-			    double gap=matchShapes(refcntrs[j],cntrs[i],CONTOURS_MATCH_I1,0) ;
+		c_area = 10 ;
+		approxPolyDP(cntrs[i],approx,arcLength(cntrs[i], true)*0.02,true) ;
+		c_area = fabs(contourArea(approx,false)) ;
+		if ( (*maxsize != -1 && *minsize != -1) && 
+			(c_area > *maxsize || c_area < *minsize) )
+		{
+			outsize++ ;
+			continue ;
+		}
+//		printf("Testing contour of area %g max=%g min = %g\n",c_area,*maxsize,*minsize) ;
+		if (Msz == -1 || c_area > Msz) Msz = c_area ;
+		else if (msz == -1 || c_area < msz) msz = c_area ;
+		    for (j=0; j<cntrsdb.size(); j++) {
+			    double gap=matchShapes(cntrsdb[j].cntr,cntrs[i],CONTOURS_MATCH_I1,0) ;
 			    if (fabs(gap) < fabs(mingap)) { mingap = gap ; minpos = j ; }
 		    }
 		    if (minpos != -1 && fabs(mingap) < 1) {
-			    cntrs[i].resize(0) ;
+			cntrsdb[minpos].lframe = fno ;
+		    }
+		    else {
+			cntr_t c ;
+			c.cntr = cntrs[i] ;
+			assert(c.cntr.size() > 0) ;
+			c.fframe = fno ;
+			c.lframe = fno ;
+			cntrsdb.emplace(cntrsdb.end(),c) ;
 			    elim++ ;
 		    }
 	    }
-	    printf("Eliminated %d counters\n", elim) ;
+	    printf("Added %d contours (%d eliminated due to size) Msz=%g msz=%g\n", elim,outsize, Msz,msz) ;
     }
+	uint cs = 0 ;
+	for (auto it = cntrsdb.begin(); it != cntrsdb.end();) {
+		if (it->lframe < fno - 30) {
+			it = cntrsdb.erase(it) ;
+			cs++ ;
+		}
+		else
+			++it ;
+	}
+	printf("Cleaned %d contours maxarea = %g minarea=%g\n",cs,Msz,msz) ;
+//	*maxsize = Msz ;
+//	*minsize = msz ;
+    return cntrsdb.size() ;
 
 
+#if 0
     pop = op ;
     cntrs_s.resize(cntrs.size()) ;
     for (i=j=0; i<cntrs.size(); i++)
@@ -300,17 +369,18 @@ int foeDetectContours(Mat & gray, char *op, int maxdata)
     }
     cntrs_s.resize(j) ;
     cout << "Total contours " << j << " contour points " << tpoints << " " ;
-    vector <Point2f> cntrpoints(tpoints) ;
-    for (i=0,np=0; i<cntrs_s.size(); i++) {
-	for (vector<Point>::iterator it = cntrs_s[i].begin() ; it != cntrs_s[i].end(); ++it)
-		cntrpoints[np++] = Point2f((float)it->x, (float)it->y) ;
-    }
-    cout << np << " points written\n" ;
+#endif
+//    vector <Point2f> cntrpoints(tpoints) ;
+//   for (i=0,np=0; i<cntrs_s.size(); i++) {
+//	for (vector<Point>::iterator it = cntrs_s[i].begin() ; it != cntrs_s[i].end(); ++it)
+//		cntrpoints[np++] = Point2f((float)it->x, (float)it->y) ;
+//   }
+//  cout << np << " points written\n" ;
 
-    Scalar fgcolor(240,113,113) ;
-    tsize = writeToArray(cntrpoints,pop,maxdata) ;
-	cvtColor(gray,gray,COLOR_GRAY2BGR) ;
-	drawContours(gray,cntrs_s,-1,fgcolor,2) ;
-    return tsize ;
+//    Scalar fgcolor(240,113,113) ;
+//    tsize = writeToArray(cntrpoints,pop,maxdata) ;
+//	cvtColor(gray,gray,COLOR_GRAY2BGR) ;
+//	drawContours(gray,cntrs_s,-1,fgcolor,2) ;
+//    return tsize ;
 }
 } // Namespace foe
