@@ -17,8 +17,13 @@ typedef struct {
 	int debug;
 } lineset_t ;
 
+typedef struct {
+	int fframe;
+	int lframe;
+	std::vector<Point> cntr;
+} cntr_t ;
 
-Point2f foeEstimate(Mat img, int nPoints, vector<Point2f> pts, vector<Point2f> pred, int width, int height)  ;
-int foeDetectContours(Mat & image, char *op, int maxdata) ;
+Point2f foeEstimate(int nPoints, vector<Point2f> pts, vector<Point2f> pred, int width, int height)  ;
+int foeDetectContours(Mat & gray, vector<cntr_t>& cntrsdb, int fno, double *maxarea, double *minarea, int threshval) ;
 }
 #endif
