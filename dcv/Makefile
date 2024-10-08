@@ -11,7 +11,7 @@ CFLAGS = -pthread -I/usr/local/include/gstreamer-1.0 -I/usr/include/glib-2.0 -I/
 	 -I$(OPENCV_DIR)/modules/core/include -I$(OPENCV_DIR)/build/  -I$(OPENCV_DIR)/modules/videoio/include -I$(OPENCV_DIR)/modules/core/include -I$(SRCHOME)/ocvStages/foe/ -I$(SRCHOME)/ocvStages/foe/dcv
 CPPFLAGS = -fpermissive -DFOESTAGE -DRTP_MUX -DVP9PAY -DVP9PAYDS $(CFLAGS) -fPIC
 LDFLAGS =  -L$(LIBDIR) -lgstreamer-1.0 -lgstapp-1.0 -lgobject-2.0 -lglib-2.0 
-DEPFILES = rseq.hpp gutils.hpp gsftc.hpp dsopencv.hpp
+DEPFILES = rseq.hpp gutils.hpp gsftc.hpp ../dsopencv.hpp
 OLIBDIR = /home/ggne0015/src/opencv-4.1.1/build/lib 
 VPATH = .:../
 #.cpp.o:
@@ -20,7 +20,7 @@ VPATH = .:../
 #	$(CPP) $(CPPFLAGS) -fPIC -c $*.c
 
 all: dcv.so dcvrtpmux.so gstr3p.so
-DCVDEPFILES = gstdcv.o dcvutils.o dsopencv.o
+DCVDEPFILES = gstdcv.o dcvutils.o ../dsopencv.o
 DCVR3PDEPFILES = gstr3p.o gstr3psink.o gstr3psrc.o tcptrans.o
 
 dcv.so: $(DCVDEPFILES)
