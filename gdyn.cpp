@@ -82,8 +82,8 @@ static char fdesc[] = "filesrc name=fsrc ! queue name=fq ! matroskademux name=md
 	
 //full pipe = ndesc + procdesc + outdesc
 static char ndesc[] = "rtpbin name=rbin \
-		       udpsrc name=usrc address=192.168.16.205 port=50017 ! rbin.recv_rtp_sink_0 \
-		       rbin.send_rtp_src_0 ! rtph264depay name=rtpvsdp ! queue %s ! tee name=tpoint " ;
+		       udpsrc name=usrc address=192.168.16.197 port=50017 ! rbin.recv_rtp_sink_0 \
+		       rbin.send_rtp_src_0 ! rtph264depay name=rtpvsdp ! queue ! tee name=tpoint " ;
 
 
 #if 0
@@ -168,7 +168,7 @@ int main( int argc, char** argv )
 	grcvr_mode_e grcvrMode = GRCVR_FIRST ;
 
 	strcpy(videofile,"v1.webm") ;
-	strcpy(clientipaddr,"192.168.16.205") ;
+	strcpy(clientipaddr,"192.168.16.197") ;
 	sprintf(qarg,"") ;
 	static struct option longOpts[] = {
 		{ "help", no_argument, 0, 'h' },
